@@ -9,15 +9,6 @@
         "REPLY_TO_EMAIL_ADDRESS": "{{RESEND_REPLY_TO_EMAIL}}"
       }
     },
-    "nia": {
-      "command": "node",
-      "args": ["{{MCP_SERVERS_PATH}}/servers/nia/index.js"],
-      "env": {
-        "NIA_API_KEY": "{{NIA_API_KEY}}",
-        "NIA_API_URL": "https://apigcp.trynia.ai/"
-      },
-      "disabled": false
-    },
     "catafract": {
       "type": "http",
       "url": "{{CATAFRACT_URL}}",
