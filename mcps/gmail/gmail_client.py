@@ -307,15 +307,14 @@ class GmailClient:
         if tag == "important":
             return "STARRED"
 
-        label_name = f"claude/{tag}"
         labels = service.users().labels().list(userId="me").execute().get("labels", [])
         for label in labels:
-            if label["name"].lower() == label_name.lower():
+            if label["name"].lower() == tag.lower():
                 return label["id"]
 
         created = service.users().labels().create(
             userId="me",
-            body={"name": label_name, "labelListVisibility": "labelShow", "messageListVisibility": "show"},
+            body={"name": tag, "labelListVisibility": "labelShow", "messageListVisibility": "show"},
         ).execute()
         return created["id"]
 
@@ -323,7 +322,7 @@ class GmailClient:
         """Resolve a tag name to a Gmail search query."""
         if tag == "important":
             return "is:starred"
-        return f"label:claude/{tag}"
+        return f"label:{tag}"
 
     def tag_messages_batch(self, messages: list[dict]) -> dict:
         """Process per-message tag operations. Groups by (account, tag, remove_tag) for efficiency."""
@@ -377,24 +376,25 @@ class GmailClient:
 
         return results
 
-    def list_tags(self, account: str | None = None) -> list[dict]:
-        """List all tags (defaults + claude/* custom labels from Gmail)."""
-        tags = list(self._DEFAULT_TAGS)
-        default_names = {t["tag"] for t in self._DEFAULT_TAGS}
+    def list_tags(self, account: str | None = None) -> dict:
+        """List all tags: built-in defaults + user-created labels per account."""
         aliases = [self._resolve_alias(account)] if account else self._get_all_aliases()
-        seen = set()
+        default_names = {t["tag"] for t in self._DEFAULT_TAGS}
+        accounts = {}
 
         for alias in aliases:
             service = self._get_service(alias)
             labels = service.users().labels().list(userId="me").execute().get("labels", [])
+            custom = []
             for label in labels:
-                if label["name"].lower().startswith("claude/"):
-                    tag_name = label["name"].split("/", 1)[1]
-                    if tag_name not in seen and tag_name not in default_names:
-                        seen.add(tag_name)
-                        tags.append({"tag": tag_name, "label_id": label["id"], "account": alias})
+                if label.get("type") == "user" and label["name"].lower() not in default_names:
+                    custom.append({"tag": label["name"], "label_id": label["id"]})
+            accounts[alias] = custom
 
-        return tags
+        return {
+            "built_in": self._DEFAULT_TAGS,
+            "accounts": accounts,
+        }
 
     def untrash_message(self, message_id: str, account: str) -> dict:
         """Recover a message from trash."""
