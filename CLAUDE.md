@@ -16,7 +16,7 @@ Update [FUTURE.md](FUTURE.md) — remove completed items and add any new ideas o
 
 ## Commits
 
-Use conventional commits. No co-authoring. Stage with `git add .` — check `.gitignore` first to confirm secrets and build artifacts are excluded.
+Use conventional commits. No co-authoring. ALWAYS stage with `git add .` — before committing, check `.gitignore` to verify no file that should not be added is missing from it.
 
 Every message MUST answer both **what** changed and **why** it changed. A message that only describes the what is wrong.
 

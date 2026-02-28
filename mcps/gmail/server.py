@@ -33,7 +33,7 @@ TagOpList = Annotated[list[TagOp], BeforeValidator(_parse_json_str)]
 
 mcp = FastMCP(
     "Gmail",
-    instructions="""Before executing any write operation (trash, tag, send, create draft), always tell the user exactly what you're about to do and wait for their confirmation.
+    instructions="""Before executing any write operation (trash, tag, send, create draft), always tell the user exactly what you're about to do and STOP your turn. Do NOT call the tool in the same message. Wait for the user to reply with confirmation before making the call.
 
 When presenting email results to the user, always:
 - Group by account (personal, work, university)
@@ -46,6 +46,11 @@ Tag system for organizing emails:
 - "credentials" → passwords, API keys, server access, login details
 - "contacts" → emails from people the user cares about maintaining a relationship with
 Custom tags beyond these three are also supported and auto-created on first use.
+
+Auto-sorted emails:
+- Emails tagged with "auto/*" labels (e.g. "auto/finances") have already been reviewed and sorted by the AI.
+- When the user asks for today's emails or checks their inbox casually, append -label:auto/finances (and any other auto/* tags) to the gmail_search_messages query to exclude already-sorted emails.
+- When the user explicitly asks to see auto-sorted emails (e.g. "show me my auto/finances emails"), do NOT exclude them.
 """,
 )
 
@@ -82,6 +87,11 @@ def gmail_search_messages(
     account: str | None = None,
 ) -> str:
     """Search emails using Gmail query syntax.
+
+    IMPORTANT: For casual email checks (e.g. "what emails today", "check my inbox"),
+    append "-label:auto/finances" (and any other auto/* tags) to the query to exclude
+    already-sorted emails. Only skip this exclusion when the user explicitly asks to
+    see auto-sorted emails.
 
     Args:
         query: Raw Gmail query string (e.g. "subject:invoice", "is:unread").
@@ -171,29 +181,25 @@ def gmail_send_message(
 
 
 @mcp.tool()
-def gmail_trash_message(message_id: str, account: str) -> str:
-    """Move an email to trash.
-
-    Args:
-        message_id: The Gmail message ID.
-        account: Email or alias — required for write operations.
-    """
-    return _json(_get_client().trash_message(message_id, account))
-
-
-@mcp.tool()
 def gmail_trash_messages(messages: MessagesList) -> str:
-    """Trash multiple emails across accounts in a single call.
+    """STOP: Tell the user what you're about to trash and wait for confirmation. Do NOT call this tool in the same turn as the user's request.
+
+    Trash emails. Supports mixed accounts in ONE call — never split by account.
 
     Args:
-        messages: List of objects with "id" (message ID) and "account" (email or alias).
+        messages: List of {"id": message_id, "account": alias_or_email}.
+
+    Example — trashing 3 emails from 2 accounts in a single call:
+        [{"id": "a1", "account": "personal"}, {"id": "b2", "account": "work"}, {"id": "b3", "account": "work"}]
     """
     return _json(_get_client().trash_messages([m.model_dump() for m in messages]))
 
 
 @mcp.tool()
 def gmail_tag_messages(messages: TagOpList) -> str:
-    """Add, remove, or swap tags on emails. Each message carries its own tag instructions.
+    """STOP: Tell the user what you're about to tag and wait for confirmation. Do NOT call this tool in the same turn as the user's request.
+
+    Add, remove, or swap tags on emails. Each message carries its own tag instructions.
 
     Each message object has:
     - id: Gmail message ID

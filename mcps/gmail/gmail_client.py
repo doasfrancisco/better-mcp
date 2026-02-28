@@ -300,6 +300,7 @@ class GmailClient:
         {"tag": "important", "description": "Starred emails — actionable, urgent, needs attention"},
         {"tag": "credentials", "description": "Passwords, API keys, server access, login details"},
         {"tag": "contacts", "description": "Emails from people you care about maintaining a relationship with"},
+        {"tag": "auto/finances", "description": "AI-sorted payments, receipts, invoices, and bank notifications"},
     ]
 
     def _resolve_tag_to_label_id(self, tag: str, service) -> str:
