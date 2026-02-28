@@ -7,9 +7,7 @@
 ### Skills
 
 - **WhatsApp skill** — Skill for sending and reading WhatsApp messages from Claude Code.
-- **Nia skill usage guide** — Document how to use the Nia skill for indexing repos, docs, and searching code. Include common workflows and examples.
 
 ### MCPs
 
-- **Playwright MCP setup guide** — Document how to install and configure the Playwright MCP for browser automation in Claude Code.
 - **Share MCP usage guide** — Document how to use the Dámelo Share MCP for exporting, importing, and sharing sessions with teams.

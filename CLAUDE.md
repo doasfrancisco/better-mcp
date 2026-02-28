@@ -2,13 +2,21 @@
 
 See [THOUGHTS.md](THOUGHTS.md) for lessons learned building MCP servers (FastMCP quirks, Gmail API patterns, tool design).
 
+## Hooks
+
+See [HOOKS.md](HOOKS.md) for Claude Code hooks patterns (sound effects, skill hooks, Windows syntax).
+
+## Old architecture
+
+See [LEGACY.md](LEGACY.md) for the removed build pipeline (build-mcps, generate-mcp-config, config templates).
+
 ## After finishing a task
 
 Update [FUTURE.md](FUTURE.md) — remove completed items and add any new ideas or next steps that came up during the work.
 
 ## Commits
 
-Use conventional commits. No co-authoring.
+Use conventional commits. No co-authoring. Stage with `git add .` — check `.gitignore` first to confirm secrets and build artifacts are excluded.
 
 Every message MUST answer both **what** changed and **why** it changed. A message that only describes the what is wrong.
 
