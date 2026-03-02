@@ -4,6 +4,16 @@
 
 - **Save recurring Claude Code behaviors** — Track the most common tasks and workflows done from Claude Code (email triage, tag management, bulk operations, etc.). Save the behavior patterns so that in the future, OpenClaw can imitate and replay them autonomously without manual guidance.
 
+### Analytics & simulations
+
+- **Daily usage analytics dashboard** — Track what the user does each day across all MCPs (emails sent/read, WhatsApp messages, contacts managed, etc.) and store events locally as structured logs. Use a lightweight tool like [Panel](https://panel.holoviz.org/) or [Streamlit](https://streamlit.io/) to visualize trends and simulate future user behavior patterns. The goal is to answer "what does a typical day look like?" and run what-if simulations (e.g., "if I unsubscribe from 10 newsletters, how does my daily email volume change?"). Start simple: log tool calls with timestamps to a local SQLite or JSON file, then layer a dashboard on top.
+
+### MCP login & account management
+
+- **Gmail: add-account tool** — Expose an `add_account` tool that triggers the OAuth2 browser flow so the user can link a new Gmail account directly from a Claude Code session. Returns a confirmation once the token is stored locally. This removes the need to run a separate setup script.
+- **WhatsApp: login tool** — Expose a `whatsapp_login` tool that starts the QR code pairing flow. Since the MCP runs locally via stdio, the session and credentials stay on the user's machine — they can read the source to verify nothing leaves their computer.
+- **General: local-first trust model** — Since Claude Code installs MCP servers locally (`claude mcp add --transport stdio`), all credentials, tokens, and session data live on the user's machine. Document this clearly so users understand the security model: the code runs on their computer, they can audit the source, and nothing is sent externally unless the code explicitly calls an API they authorized (Gmail API, WhatsApp Web, etc.).
+
 ### MCPs
 
 - **Share MCP usage guide** — Document how to use the Dámelo Share MCP for exporting, importing, and sharing sessions with teams.
