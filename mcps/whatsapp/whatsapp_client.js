@@ -1,0 +1,755 @@
+import pkg from "whatsapp-web.js";
+const { Client, LocalAuth } = pkg;
+import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from "fs";
+import { join, dirname } from "path";
+import { fileURLToPath } from "url";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const AUTH_DIR = join(__dirname, ".wwebjs_auth");
+const CACHE_DIR = join(__dirname, ".wwebjs_cache");
+const AUTH_MARKER = join(AUTH_DIR, ".authenticated");
+const CONTACTS_CACHE = join(__dirname, "contacts.json");
+const CHATS_CACHE = join(__dirname, "chats.json");
+const TAGS_CACHE = join(__dirname, "tags.json");
+const MESSAGES_DIR = join(__dirname, "messages");
+
+const DEFAULT_TAGS = {
+  family: { description: "Family members" },
+  work: { description: "Work and professional contacts" },
+  partner: { description: "Partner" },
+  followup: { description: "Follow-ups and things to track" },
+};
+
+let client = null;
+let ready = false;
+
+// ── Init & auth ───────────────────────────────────────────────
+
+/**
+ * Initialize and return the WhatsApp client.
+ * First run opens a browser for QR auth; subsequent runs reconnect headlessly.
+ * Uses a marker file (.authenticated) written after successful auth — directory
+ * existence alone is not reliable because LocalAuth creates it before auth completes.
+ */
+export function init() {
+  if (client) return client;
+
+  const hasSession = existsSync(AUTH_MARKER);
+  console.error(`[whatsapp] Session marker exists: ${hasSession}, headless: ${hasSession}`);
+
+  client = new Client({
+    authStrategy: new LocalAuth({ dataPath: AUTH_DIR }),
+    puppeteer: {
+      headless: hasSession,
+      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    },
+    webVersionCache: {
+      type: "local",
+      path: CACHE_DIR,
+    },
+  });
+
+  client.on("qr", (qr) => {
+    console.error("[whatsapp] QR code received — scan with your phone");
+    console.error("[whatsapp] If no browser opened, copy this QR string into a QR viewer:");
+    console.error(qr);
+  });
+
+  client.on("authenticated", () => {
+    console.error("[whatsapp] Authenticated");
+    try {
+      writeFileSync(AUTH_MARKER, new Date().toISOString());
+    } catch {}
+  });
+
+  client.on("auth_failure", (msg) => {
+    console.error("[whatsapp] Auth failure:", msg);
+    ready = false;
+    try {
+      unlinkSync(AUTH_MARKER);
+    } catch {}
+  });
+
+  client.on("ready", () => {
+    console.error("[whatsapp] Client ready");
+    ready = true;
+  });
+
+  client.on("disconnected", (reason) => {
+    console.error("[whatsapp] Disconnected:", reason);
+    ready = false;
+  });
+
+  client.initialize();
+
+  return client;
+}
+
+export function isReady() {
+  return ready;
+}
+
+function assertReady() {
+  if (!ready) {
+    throw new Error(
+      "WhatsApp client is not connected yet. " +
+        "If this is the first run, a browser window should open for QR scanning. " +
+        "Wait for authentication to complete and try again."
+    );
+  }
+}
+
+// ── Cache helpers ─────────────────────────────────────────────
+
+function readCache(path) {
+  if (!existsSync(path)) return null;
+  return JSON.parse(readFileSync(path, "utf-8"));
+}
+
+function writeCache(path, data) {
+  try {
+    writeFileSync(path, JSON.stringify(data, null, 2));
+  } catch {}
+}
+
+/**
+ * Build a number → contact name map from the contacts cache.
+ * Maps both the raw number and @lid/@c.us number portions so @mentions can be resolved.
+ */
+export function getMentionMap() {
+  const contacts = readCache(CONTACTS_CACHE) || [];
+  const map = {};
+  for (const c of contacts) {
+    const name = c.name || c.pushname || null;
+    if (!name) continue;
+    // Map the number portion of the id (e.g. "13061113008215" from "13061113008215@lid")
+    const num = c.id.split("@")[0];
+    if (num && !map[num]) map[num] = name;
+    // Also map the explicit number field
+    if (c.number && !map[c.number]) map[c.number] = name;
+  }
+  return map;
+}
+
+// ── Sync (API calls — the only functions that touch the network) ──
+
+/** Fields tracked for changes — if any differ, snapshot old values. */
+const CONTACT_TRACKED_FIELDS = ["name", "pushname", "number"];
+
+/**
+ * Sync contacts from the API. Merges with existing cache: new contacts are
+ * added, changed contacts keep a `previous` array with snapshots of old values.
+ * Returns { synced: number, added: number, changed: number }.
+ */
+export async function syncContacts() {
+  assertReady();
+  const contacts = await client.getContacts();
+
+  // Only saved contacts. To include all users (e.g. from groups): c.isMyContact || c.isUser
+  const fresh = contacts
+    .filter((c) => c.isMyContact)
+    .map((c) => ({
+      id: c.id._serialized,
+      name: c.name || null,
+      pushname: c.pushname || null,
+      number: c.number,
+      isMyContact: c.isMyContact,
+      isGroup: c.isGroup,
+      isUser: c.isUser,
+    }));
+
+  const cached = readCache(CONTACTS_CACHE);
+  if (!cached) {
+    writeCache(CONTACTS_CACHE, fresh);
+    return { synced: fresh.length, added: fresh.length, changed: 0 };
+  }
+
+  const cacheIndex = Object.fromEntries(cached.map((c) => [c.id, c]));
+  let added = 0;
+  let changed = 0;
+
+  const merged = fresh.map((fc) => {
+    const old = cacheIndex[fc.id];
+    if (!old) {
+      added++;
+      return fc;
+    }
+
+    const hasChanged = CONTACT_TRACKED_FIELDS.some((f) => fc[f] !== old[f]);
+    if (!hasChanged) {
+      if (old.previous) fc.previous = old.previous;
+      return fc;
+    }
+
+    changed++;
+    const snapshot = {};
+    for (const f of CONTACT_TRACKED_FIELDS) snapshot[f] = old[f];
+    snapshot.changedAt = new Date().toISOString();
+    fc.previous = [...(old.previous || []), snapshot];
+    return fc;
+  });
+
+  writeCache(CONTACTS_CACHE, merged);
+  return { synced: merged.length, added, changed };
+}
+
+/** Fields tracked for chat changes. */
+const CHAT_TRACKED_FIELDS = ["name"];
+
+/**
+ * Sync all chats from the API. Saves chat metadata (not messages) to chats.json.
+ * For groups, includes participant list. Merges with existing cache.
+ * Returns { synced: number, added: number, changed: number }.
+ */
+export async function syncChats() {
+  assertReady();
+  const chats = await client.getChats();
+
+  const fresh = chats.map((c) => {
+    const chat = {
+      id: c.id._serialized,
+      name: c.name || null,
+      isGroup: c.isGroup,
+      timestamp: c.timestamp ? new Date(c.timestamp * 1000).toISOString() : null,
+      unreadCount: c.unreadCount || 0,
+      archived: c.archived || false,
+      pinned: c.pinned || false,
+    };
+
+    if (c.lastMessage) {
+      chat.lastMessage = {
+        body: c.lastMessage.body || null,
+        type: c.lastMessage.type,
+        timestamp: c.lastMessage.timestamp
+          ? new Date(c.lastMessage.timestamp * 1000).toISOString()
+          : null,
+        fromMe: c.lastMessage.fromMe || false,
+      };
+    }
+
+    if (c.isGroup && c.participants) {
+      chat.participants = c.participants.map((p) => ({
+        id: p.id._serialized,
+        isAdmin: p.isAdmin || false,
+        isSuperAdmin: p.isSuperAdmin || false,
+      }));
+    }
+
+    return chat;
+  });
+
+  const cached = readCache(CHATS_CACHE);
+  if (!cached) {
+    const result = { lastRefresh: new Date().toISOString(), data: fresh };
+    writeCache(CHATS_CACHE, result);
+    return { synced: fresh.length, added: fresh.length, changed: 0 };
+  }
+
+  const cacheIndex = Object.fromEntries(cached.data.map((c) => [c.id, c]));
+  let added = 0;
+  let changed = 0;
+
+  const merged = fresh.map((fc) => {
+    const old = cacheIndex[fc.id];
+    if (!old) {
+      added++;
+      return fc;
+    }
+
+    const hasChanged = CHAT_TRACKED_FIELDS.some((f) => fc[f] !== old[f]);
+    if (!hasChanged) {
+      if (old.previous) fc.previous = old.previous;
+      return fc;
+    }
+
+    changed++;
+    const snapshot = {};
+    for (const f of CHAT_TRACKED_FIELDS) snapshot[f] = old[f];
+    snapshot.changedAt = new Date().toISOString();
+    fc.previous = [...(old.previous || []), snapshot];
+    return fc;
+  });
+
+  const result = { lastRefresh: new Date().toISOString(), data: merged };
+  writeCache(CHATS_CACHE, result);
+  return { synced: merged.length, added, changed };
+}
+
+/**
+ * Sync both contacts and chats in parallel.
+ * Returns combined stats from both operations.
+ */
+export async function syncAll() {
+  assertReady();
+  const [contacts, chats] = await Promise.all([syncContacts(), syncChats()]);
+  return {
+    contacts: { synced: contacts.synced, added: contacts.added, changed: contacts.changed },
+    chats: { synced: chats.synced, added: chats.added, changed: chats.changed },
+  };
+}
+
+/**
+ * Sync messages for specific chats from the API into local cache files.
+ * Fetches messages back to `since` date (default: 2 days ago) by growing batch
+ * sizes until the oldest fetched message is older than the cutoff.
+ * Deduplicates by message id, sorts by timestamp. Re-syncing with a wider date
+ * range merges cleanly — existing messages are kept, new older ones are added.
+ */
+export async function syncMessages(chatNames, since) {
+  assertReady();
+  if (!existsSync(MESSAGES_DIR)) mkdirSync(MESSAGES_DIR);
+
+  const cutoff = since
+    ? new Date(since + "T00:00:00Z")
+    : new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+  const cutoffISO = cutoff.toISOString();
+
+  const results = [];
+  for (const name of chatNames) {
+    const chat = await findChat(name);
+    if (!chat) {
+      results.push({ chat: name, error: "not found" });
+      continue;
+    }
+
+    // Fetch in growing batches until we've reached past the cutoff date
+    let messages = [];
+    let batch = 50;
+    const MAX_BATCH = 1000;
+    while (batch <= MAX_BATCH) {
+      messages = await getChatMessages(chat, batch);
+      if (messages.length === 0 || messages.length < batch) break;
+      // messages[0] is the oldest (chronological order)
+      if (messages[0].timestamp <= cutoffISO) break;
+      batch *= 2;
+    }
+
+    // Keep only messages within the date range
+    const filtered = messages.filter((m) => m.timestamp >= cutoffISO);
+
+    const filePath = join(MESSAGES_DIR, `${chat.id._serialized}.json`);
+    const existing = readCache(filePath) || [];
+
+    // Merge: index existing by id, overwrite with fresh
+    const index = Object.fromEntries(existing.map((m) => [m.id, m]));
+    for (const m of filtered) index[m.id] = m;
+    const merged = Object.values(index).sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+
+    writeCache(filePath, merged);
+    results.push({ chat: chat.name, id: chat.id._serialized, synced: filtered.length, total: merged.length, added: merged.length - existing.length });
+  }
+  return results;
+}
+
+// ── Read (cache-only — never call the API) ────────────────────
+
+/**
+ * Unified search across contacts and chats caches.
+ * Merges both sources into a single index — contacts provide identity,
+ * chats provide activity metadata. Supports filtering by query, tag, date, and type.
+ * Never calls the API.
+ */
+export function find({ query, tag, from, filter } = {}) {
+  // Default to today's activity when browsing (no specific search params)
+  if (!query && !tag && !from && !filter) {
+    const now = new Date();
+    from = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  }
+
+  const tagData = readTags();
+  const contacts = readCache(CONTACTS_CACHE) || [];
+  const chatCache = readCache(CHATS_CACHE);
+  const chats = chatCache?.data || [];
+
+  // Build a merged index by id — contacts provide identity, chats provide activity
+  const index = {};
+
+  for (const c of contacts) {
+    index[c.id] = { ...c, tags: tagData.contacts[c.id] || [] };
+  }
+
+  for (const c of chats) {
+    if (index[c.id]) {
+      // Enrich existing contact with chat metadata
+      Object.assign(index[c.id], {
+        timestamp: c.timestamp,
+        unreadCount: c.unreadCount,
+        archived: c.archived,
+        pinned: c.pinned,
+        lastMessage: c.lastMessage,
+        participants: c.participants,
+      });
+    } else {
+      // Group or chat not in contacts — add it
+      index[c.id] = { ...c, tags: tagData.contacts[c.id] || [] };
+    }
+  }
+
+  let results = Object.values(index);
+
+  // Filter by tag
+  if (tag) {
+    results = results.filter((r) => r.tags.includes(tag));
+  }
+
+  // Filter by name query
+  if (query) {
+    const q = query.toLowerCase();
+    results = results.filter(
+      (r) =>
+        r.name?.toLowerCase().includes(q) ||
+        r.pushname?.toLowerCase().includes(q)
+    );
+  }
+
+  // Filter by date (from chats data)
+  if (from) {
+    const fromISO = new Date(from + "T00:00:00Z").toISOString();
+    results = results.filter((r) => r.timestamp && r.timestamp >= fromISO);
+  }
+
+  // Filter by type
+  if (filter === "pinned") results = results.filter((r) => r.pinned);
+  else if (filter === "unread") results = results.filter((r) => r.unreadCount > 0);
+  else if (filter === "groups") results = results.filter((r) => r.isGroup);
+
+  // Sort by most recent activity
+  results.sort((a, b) => (b.timestamp || "").localeCompare(a.timestamp || ""));
+
+  return results;
+}
+
+/**
+ * Get cached messages for a chat. Cache-only — no API calls.
+ * Resolves the chat name to an id via contacts/chats cache, then reads messages/{id}.json.
+ */
+export function getMessages(chatQuery, since) {
+  const resolved = resolveContact(chatQuery);
+  if (!resolved) return { messages: [], error: `No chat found matching "${chatQuery}". Sync first.` };
+
+  const filePath = join(MESSAGES_DIR, `${resolved.id}.json`);
+  const cached = readCache(filePath);
+  if (!cached) return { messages: [], chat: resolved.name, error: "No messages cached. Use whatsapp_sync with what=\"messages\" first." };
+
+  const cutoff = since
+    ? new Date(since)
+    : new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const filtered = cached.filter((m) => new Date(m.timestamp) >= cutoff);
+
+  return { chat: resolved.name, id: resolved.id, messages: filtered };
+}
+
+// ── Tags (cache-only) ─────────────────────────────────────────
+
+/**
+ * Read tags cache, seeding defaults on first access.
+ * Shape: { tags: { [name]: { description } }, contacts: { [contactId]: [tagName] } }
+ */
+function readTags() {
+  const cached = readCache(TAGS_CACHE);
+  if (cached) return cached;
+  const fresh = { tags: { ...DEFAULT_TAGS }, contacts: {} };
+  writeCache(TAGS_CACHE, fresh);
+  return fresh;
+}
+
+/**
+ * Check if a query matches a name at word boundaries.
+ * Each query word must match at least one whole word in the name.
+ * "Casa" won't match "Casachagua", but "Javier" matches "Javier Eduardo Carbajal".
+ */
+function wordMatch(name, queryWords) {
+  if (!name) return false;
+  const nameWords = name.toLowerCase().split(/\s+/);
+  return queryWords.every((qw) => nameWords.some((nw) => nw === qw));
+}
+
+/**
+ * Resolve a contact or group query to an id using both caches.
+ * Pass 1: exact full-name match. Pass 2: word-level match.
+ * Returns { id, name } or null.
+ */
+function resolveContact(query) {
+  const q = query.toLowerCase();
+  const queryWords = q.split(/\s+/);
+
+  // Search contacts cache — prefer @c.us over @lid (WhatsApp internal linked IDs)
+  // because chat APIs and message files use @c.us format.
+  const contacts = readCache(CONTACTS_CACHE);
+  if (contacts) {
+    const preferCus = (matches) => matches.find((c) => c.id.endsWith("@c.us")) || matches[0];
+
+    // Pass 1: exact full-name match
+    const exactAll = contacts.filter(
+      (c) =>
+        c.name?.toLowerCase() === q ||
+        c.pushname?.toLowerCase() === q ||
+        c.id === query
+    );
+    if (exactAll.length > 0) {
+      const pick = preferCus(exactAll);
+      return { id: pick.id, name: pick.name || pick.pushname || pick.number };
+    }
+
+    // Pass 2: word-level match (every query word must match a whole word in the name)
+    const wordAll = contacts.filter(
+      (c) => wordMatch(c.name, queryWords) || wordMatch(c.pushname, queryWords)
+    );
+    if (wordAll.length > 0) {
+      const pick = preferCus(wordAll);
+      return { id: pick.id, name: pick.name || pick.pushname || pick.number };
+    }
+  }
+
+  // Search chats cache (for groups and contacts not in the contacts list)
+  const chats = readCache(CHATS_CACHE);
+  if (chats?.data) {
+    const exact = chats.data.find(
+      (c) => c.name?.toLowerCase() === q || c.id === query
+    );
+    if (exact) return { id: exact.id, name: exact.name };
+
+    const word = chats.data.find((c) => wordMatch(c.name, queryWords));
+    if (word) return { id: word.id, name: word.name };
+  }
+
+  return null;
+}
+
+/**
+ * Find candidate contacts/chats when a multi-word query fails exact resolution.
+ * Splits the query into words and finds entries where ANY word matches a whole name word.
+ * Returns an array of { id, name } candidates.
+ */
+function findCandidates(query) {
+  const words = query.toLowerCase().split(/\s+/);
+  const candidates = [];
+  const seenIds = new Set();
+  const seenNames = new Set();
+
+  function addCandidate(id, name) {
+    if (seenIds.has(id) || seenNames.has(name)) return;
+    seenIds.add(id);
+    seenNames.add(name);
+    candidates.push({ id, name });
+  }
+
+  const contacts = readCache(CONTACTS_CACHE);
+  if (contacts) {
+    for (const c of contacts) {
+      const nameWords = (c.name || "").toLowerCase().split(/\s+/);
+      const pushnameWords = (c.pushname || "").toLowerCase().split(/\s+/);
+      const allWords = [...nameWords, ...pushnameWords];
+      if (words.some((w) => allWords.some((nw) => nw === w))) {
+        addCandidate(c.id, c.name || c.pushname || c.number);
+      }
+    }
+  }
+
+  const chats = readCache(CHATS_CACHE);
+  if (chats?.data) {
+    for (const c of chats.data) {
+      const nameWords = (c.name || "").toLowerCase().split(/\s+/);
+      if (words.some((w) => nameWords.some((nw) => nw === w))) {
+        addCandidate(c.id, c.name);
+      }
+    }
+  }
+
+  return candidates;
+}
+
+/**
+ * Add tags to a contact. Creates new tags automatically if they don't exist.
+ * `contact` is a name/number/id query, `tags` is an array of tag names.
+ */
+export function tagContact(contact, tags) {
+  const resolved = resolveContact(contact);
+  if (!resolved) {
+    const words = contact.split(/\s+/);
+    if (words.length > 1) {
+      const candidates = findCandidates(contact);
+      if (candidates.length > 0) {
+        return { candidates: candidates.map((c) => c.name), query: contact };
+      }
+    }
+    return { error: `No contact found matching "${contact}". Sync contacts first.` };
+  }
+
+  const data = readTags();
+  for (const tag of tags) {
+    if (!data.tags[tag]) data.tags[tag] = { description: null };
+  }
+  const existing = data.contacts[resolved.id] || [];
+  const merged = [...new Set([...existing, ...tags])];
+  data.contacts[resolved.id] = merged;
+  writeCache(TAGS_CACHE, data);
+  return { contact: resolved.name, id: resolved.id, tags: merged };
+}
+
+/**
+ * Remove tags from a contact.
+ */
+export function untagContact(contact, tags) {
+  const resolved = resolveContact(contact);
+  if (!resolved) return { error: `No contact found matching "${contact}". Sync contacts first.` };
+
+  const data = readTags();
+  const existing = data.contacts[resolved.id] || [];
+  const remaining = existing.filter((t) => !tags.includes(t));
+  if (remaining.length === 0) {
+    delete data.contacts[resolved.id];
+  } else {
+    data.contacts[resolved.id] = remaining;
+  }
+  writeCache(TAGS_CACHE, data);
+  return { contact: resolved.name, id: resolved.id, tags: remaining };
+}
+
+/**
+ * Get all tags for a specific contact.
+ */
+export function getContactTags(contact) {
+  const resolved = resolveContact(contact);
+  if (!resolved) return null;
+  const data = readTags();
+  return data.contacts[resolved.id] || [];
+}
+
+// ── Chat resolution & message fetching (API — used by syncMessages) ──
+
+/**
+ * Find a chat by name or phone number.
+ * Searches cached chats first; falls back to API only if cache is empty.
+ */
+export async function findChat(query) {
+  // Try cache first
+  const cached = readCache(CHATS_CACHE);
+  if (cached) {
+    const q = query.toLowerCase();
+    const match = cached.data.find(
+      (c) => c.name?.toLowerCase() === q || c.id === query
+    ) || cached.data.find(
+      (c) => c.name?.toLowerCase().includes(q)
+    );
+    if (match) {
+      // Need the live chat object for fetchMessages
+      assertReady();
+      const chats = await client.getChats();
+      return chats.find((c) => c.id._serialized === match.id) || null;
+    }
+  }
+
+  // No cache or no match — fall back to API
+  assertReady();
+  const chats = await client.getChats();
+  const q = query.toLowerCase();
+
+  let chat = chats.find(
+    (c) => c.name?.toLowerCase() === q || c.id._serialized === query || c.id.user === query
+  );
+  if (!chat) {
+    chat = chats.find((c) => c.name?.toLowerCase().includes(q));
+  }
+  return chat || null;
+}
+
+/**
+ * Get messages from a chat.
+ * Returns formatted message objects with id, sender, body, timestamp, etc.
+ */
+export async function getChatMessages(chat, limit = 50) {
+  assertReady();
+  const messages = await chat.fetchMessages({ limit });
+
+  // Cache contacts we resolve to avoid repeated lookups for the same sender
+  const contactCache = {};
+  const formatted = [];
+  for (const msg of messages) {
+    if (!contactCache[msg.from]) {
+      const contact = await msg.getContact();
+      contactCache[msg.from] = contact.pushname || contact.name || msg.from;
+    }
+    formatted.push({
+      id: msg.id._serialized,
+      sender: contactCache[msg.from],
+      from: msg.from,
+      body: msg.body,
+      timestamp: new Date(msg.timestamp * 1000).toISOString(),
+      type: msg.type,
+      hasMedia: msg.hasMedia,
+      isForwarded: msg.isForwarded,
+      hasQuotedMsg: msg.hasQuotedMsg,
+    });
+  }
+
+  return formatted;
+}
+
+/**
+ * Get group metadata (participants, description, owner).
+ */
+export async function getGroupInfo(chat) {
+  assertReady();
+  if (!chat.isGroup) return null;
+
+  const participants = await chat.participants;
+
+  return {
+    name: chat.name,
+    description: chat.description || null,
+    participantCount: participants?.length || 0,
+    participants:
+      participants?.map((p) => ({
+        id: p.id._serialized,
+        isAdmin: p.isAdmin,
+        isSuperAdmin: p.isSuperAdmin,
+      })) || [],
+  };
+}
+
+// ── Write helpers (commented out for later) ───────────────────
+
+export async function sendMessage(chatId, text) {
+  assertReady();
+  return await client.sendMessage(chatId, text);
+}
+
+export async function replyToMessage(messageId, text) {
+  assertReady();
+  const chats = await client.getChats();
+  for (const chat of chats) {
+    const messages = await chat.fetchMessages({ limit: 100 });
+    const target = messages.find((m) => m.id._serialized === messageId);
+    if (target) {
+      return await target.reply(text);
+    }
+  }
+  throw new Error(`Message ${messageId} not found`);
+}
+
+export async function reactToMessage(messageId, emoji) {
+  assertReady();
+  const chats = await client.getChats();
+  for (const chat of chats) {
+    const messages = await chat.fetchMessages({ limit: 100 });
+    const target = messages.find((m) => m.id._serialized === messageId);
+    if (target) {
+      return await target.react(emoji);
+    }
+  }
+  throw new Error(`Message ${messageId} not found`);
+}
+
+export async function deleteMessage(messageId) {
+  assertReady();
+  const chats = await client.getChats();
+  for (const chat of chats) {
+    const messages = await chat.fetchMessages({ limit: 100 });
+    const target = messages.find((m) => m.id._serialized === messageId);
+    if (target) {
+      return await target.delete(true);
+    }
+  }
+  throw new Error(`Message ${messageId} not found`);
+}
