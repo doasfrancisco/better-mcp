@@ -22,6 +22,9 @@ const DEFAULT_TAGS = {
 
 let client = null;
 let ready = false;
+let reconnecting = false;
+let reconnectAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 3;
 
 // ── Init & auth ───────────────────────────────────────────────
 
@@ -73,11 +76,14 @@ export function init() {
   client.on("ready", () => {
     console.error("[whatsapp] Client ready");
     ready = true;
+    reconnecting = false;
+    reconnectAttempts = 0;
   });
 
   client.on("disconnected", (reason) => {
     console.error("[whatsapp] Disconnected:", reason);
     ready = false;
+    reconnect();
   });
 
   client.initialize();
@@ -85,17 +91,71 @@ export function init() {
   return client;
 }
 
+/**
+ * Destroy the current client and reinitialize.
+ * Capped at MAX_RECONNECT_ATTEMPTS consecutive failures to avoid infinite loops.
+ * Counter resets on successful `ready` event.
+ */
+async function reconnect() {
+  if (reconnecting) return;
+
+  reconnectAttempts++;
+  if (reconnectAttempts > MAX_RECONNECT_ATTEMPTS) {
+    console.error(`[whatsapp] Max reconnect attempts (${MAX_RECONNECT_ATTEMPTS}) reached — giving up. Restart the MCP server manually.`);
+    reconnecting = false;
+    return;
+  }
+
+  reconnecting = true;
+  console.error(`[whatsapp] Reconnecting (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`);
+
+  if (client) {
+    try {
+      await client.destroy();
+    } catch (err) {
+      console.error("[whatsapp] Error destroying client:", err.message);
+    }
+    client = null;
+  }
+
+  ready = false;
+  reconnecting = false; // clear before init() so init() doesn't see stale flag
+  init();
+}
+
 export function isReady() {
   return ready;
 }
 
 function assertReady() {
+  if (reconnecting) {
+    throw new Error("WhatsApp is reconnecting — try again in a few seconds.");
+  }
   if (!ready) {
     throw new Error(
       "WhatsApp client is not connected yet. " +
         "If this is the first run, a browser window should open for QR scanning. " +
         "Wait for authentication to complete and try again."
     );
+  }
+}
+
+/**
+ * Wrap an async function that calls the WhatsApp API.
+ * If it throws a "detached Frame" error (Puppeteer session died without
+ * triggering the `disconnected` event), trigger a reconnect and throw
+ * a user-friendly message instead of the raw Puppeteer error.
+ */
+async function withReconnect(fn) {
+  try {
+    return await fn();
+  } catch (err) {
+    if (err.message?.includes("detached Frame") || err.message?.includes("Session closed")) {
+      console.error("[whatsapp] Detached frame detected — triggering reconnect");
+      reconnect();
+      throw new Error("WhatsApp session lost — reconnecting automatically. Try again in a few seconds.");
+    }
+    throw err;
   }
 }
 
@@ -143,7 +203,7 @@ const CONTACT_TRACKED_FIELDS = ["name", "pushname", "number"];
  */
 export async function syncContacts() {
   assertReady();
-  const contacts = await client.getContacts();
+  const contacts = await withReconnect(() => client.getContacts());
 
   // Only saved contacts. To include all users (e.g. from groups): c.isMyContact || c.isUser
   const fresh = contacts
@@ -203,7 +263,7 @@ const CHAT_TRACKED_FIELDS = ["name"];
  */
 export async function syncChats() {
   assertReady();
-  const chats = await client.getChats();
+  const chats = await withReconnect(() => client.getChats());
 
   const fresh = chats.map((c) => {
     const chat = {
@@ -242,12 +302,13 @@ export async function syncChats() {
   if (!cached) {
     const result = { lastRefresh: new Date().toISOString(), data: fresh };
     writeCache(CHATS_CACHE, result);
-    return { synced: fresh.length, added: fresh.length, changed: 0 };
+    return { synced: fresh.length, added: fresh.length, changed: 0, updated: 0 };
   }
 
   const cacheIndex = Object.fromEntries(cached.data.map((c) => [c.id, c]));
   let added = 0;
   let changed = 0;
+  let updated = 0;
 
   const merged = fresh.map((fc) => {
     const old = cacheIndex[fc.id];
@@ -256,23 +317,29 @@ export async function syncChats() {
       return fc;
     }
 
+    // Identity change (e.g. group renamed)
     const hasChanged = CHAT_TRACKED_FIELDS.some((f) => fc[f] !== old[f]);
-    if (!hasChanged) {
+    if (hasChanged) {
+      changed++;
+      const snapshot = {};
+      for (const f of CHAT_TRACKED_FIELDS) snapshot[f] = old[f];
+      snapshot.changedAt = new Date().toISOString();
+      fc.previous = [...(old.previous || []), snapshot];
+    } else {
       if (old.previous) fc.previous = old.previous;
-      return fc;
     }
 
-    changed++;
-    const snapshot = {};
-    for (const f of CHAT_TRACKED_FIELDS) snapshot[f] = old[f];
-    snapshot.changedAt = new Date().toISOString();
-    fc.previous = [...(old.previous || []), snapshot];
+    // Activity change (new messages or unread count changed)
+    if (fc.timestamp !== old.timestamp || fc.unreadCount !== old.unreadCount) {
+      updated++;
+    }
+
     return fc;
   });
 
   const result = { lastRefresh: new Date().toISOString(), data: merged };
   writeCache(CHATS_CACHE, result);
-  return { synced: merged.length, added, changed };
+  return { synced: merged.length, added, changed, updated };
 }
 
 /**
@@ -284,7 +351,7 @@ export async function syncAll() {
   const [contacts, chats] = await Promise.all([syncContacts(), syncChats()]);
   return {
     contacts: { synced: contacts.synced, added: contacts.added, changed: contacts.changed },
-    chats: { synced: chats.synced, added: chats.added, changed: chats.changed },
+    chats: { synced: chats.synced, added: chats.added, changed: chats.changed, updated: chats.updated },
   };
 }
 
@@ -317,7 +384,7 @@ export async function syncMessages(chatNames, since) {
     let batch = 50;
     const MAX_BATCH = 1000;
     while (batch <= MAX_BATCH) {
-      messages = await getChatMessages(chat, batch);
+      messages = await withReconnect(() => getChatMessages(chat, batch));
       if (messages.length === 0 || messages.length < batch) break;
       // messages[0] is the oldest (chronological order)
       if (messages[0].timestamp <= cutoffISO) break;
@@ -427,8 +494,25 @@ export function getMessages(chatQuery, since) {
   const resolved = resolveContact(chatQuery);
   if (!resolved) return { messages: [], error: `No chat found matching "${chatQuery}". Sync first.` };
 
-  const filePath = join(MESSAGES_DIR, `${resolved.id}.json`);
-  const cached = readCache(filePath);
+  let filePath = join(MESSAGES_DIR, `${resolved.id}.json`);
+  let cached = readCache(filePath);
+
+  // Fallback: contacts resolve to @c.us but message files use the live chat id (@lid).
+  // Check chats cache for an alternative id when the primary one has no messages file.
+  if (!cached) {
+    const chatCache = readCache(CHATS_CACHE);
+    if (chatCache?.data) {
+      const rName = resolved.name?.toLowerCase();
+      const alt = chatCache.data.find(
+        (c) => c.id !== resolved.id && c.name?.toLowerCase() === rName
+      );
+      if (alt) {
+        filePath = join(MESSAGES_DIR, `${alt.id}.json`);
+        cached = readCache(filePath);
+      }
+    }
+  }
+
   if (!cached) return { messages: [], chat: resolved.name, error: "No messages cached. Use whatsapp_sync with what=\"messages\" first." };
 
   const cutoff = since
@@ -623,35 +707,44 @@ export function getContactTags(contact) {
  * Searches cached chats first; falls back to API only if cache is empty.
  */
 export async function findChat(query) {
-  // Try cache first
-  const cached = readCache(CHATS_CACHE);
-  if (cached) {
-    const q = query.toLowerCase();
-    const match = cached.data.find(
-      (c) => c.name?.toLowerCase() === q || c.id === query
-    ) || cached.data.find(
-      (c) => c.name?.toLowerCase().includes(q)
-    );
-    if (match) {
-      // Need the live chat object for fetchMessages
-      assertReady();
-      const chats = await client.getChats();
-      return chats.find((c) => c.id._serialized === match.id) || null;
+  try {
+    // Try cache first
+    const cached = readCache(CHATS_CACHE);
+    if (cached) {
+      const q = query.toLowerCase();
+      const match = cached.data.find(
+        (c) => c.name?.toLowerCase() === q || c.id === query
+      ) || cached.data.find(
+        (c) => c.name?.toLowerCase().includes(q)
+      );
+      if (match) {
+        // Need the live chat object for fetchMessages
+        assertReady();
+        console.error(`[whatsapp] findChat: cache hit for "${query}" → id=${match.id}, fetching live chats...`);
+        const chats = await withReconnect(() => client.getChats());
+        const live = chats.find((c) => c.id._serialized === match.id);
+        if (!live) console.error(`[whatsapp] findChat: no live chat matched id=${match.id} (${chats.length} live chats)`);
+        return live || null;
+      }
     }
-  }
 
-  // No cache or no match — fall back to API
-  assertReady();
-  const chats = await client.getChats();
-  const q = query.toLowerCase();
+    // No cache or no match — fall back to API
+    assertReady();
+    console.error(`[whatsapp] findChat: cache miss for "${query}", falling back to API...`);
+    const chats = await withReconnect(() => client.getChats());
+    const q = query.toLowerCase();
 
-  let chat = chats.find(
-    (c) => c.name?.toLowerCase() === q || c.id._serialized === query || c.id.user === query
-  );
-  if (!chat) {
-    chat = chats.find((c) => c.name?.toLowerCase().includes(q));
+    let chat = chats.find(
+      (c) => c.name?.toLowerCase() === q || c.id._serialized === query || c.id.user === query
+    );
+    if (!chat) {
+      chat = chats.find((c) => c.name?.toLowerCase().includes(q));
+    }
+    return chat || null;
+  } catch (err) {
+    console.error(`[whatsapp] findChat("${query}") failed: ${err.message}`);
+    throw err;
   }
-  return chat || null;
 }
 
 /**
@@ -660,27 +753,33 @@ export async function findChat(query) {
  */
 export async function getChatMessages(chat, limit = 50) {
   assertReady();
-  const messages = await chat.fetchMessages({ limit });
+  console.error(`[whatsapp] getChatMessages: fetching ${limit} msgs for "${chat.name}" (${chat.id._serialized})...`);
+  const messages = await withReconnect(() => chat.fetchMessages({ limit }));
+  console.error(`[whatsapp] getChatMessages: got ${messages.length} msgs, resolving contacts...`);
 
   // Cache contacts we resolve to avoid repeated lookups for the same sender
   const contactCache = {};
   const formatted = [];
   for (const msg of messages) {
-    if (!contactCache[msg.from]) {
-      const contact = await msg.getContact();
-      contactCache[msg.from] = contact.pushname || contact.name || msg.from;
+    try {
+      if (!contactCache[msg.from]) {
+        const contact = await withReconnect(() => msg.getContact());
+        contactCache[msg.from] = contact.pushname || contact.name || msg.from;
+      }
+      formatted.push({
+        id: msg.id._serialized,
+        sender: contactCache[msg.from],
+        from: msg.from,
+        body: msg.body,
+        timestamp: new Date(msg.timestamp * 1000).toISOString(),
+        type: msg.type,
+        hasMedia: msg.hasMedia,
+        isForwarded: msg.isForwarded,
+        hasQuotedMsg: msg.hasQuotedMsg,
+      });
+    } catch (err) {
+      console.error(`[whatsapp] getChatMessages: skipping msg (type=${msg.type}, from=${msg.from}): ${err.message}`);
     }
-    formatted.push({
-      id: msg.id._serialized,
-      sender: contactCache[msg.from],
-      from: msg.from,
-      body: msg.body,
-      timestamp: new Date(msg.timestamp * 1000).toISOString(),
-      type: msg.type,
-      hasMedia: msg.hasMedia,
-      isForwarded: msg.isForwarded,
-      hasQuotedMsg: msg.hasQuotedMsg,
-    });
   }
 
   return formatted;
@@ -712,17 +811,17 @@ export async function getGroupInfo(chat) {
 
 export async function sendMessage(chatId, text) {
   assertReady();
-  return await client.sendMessage(chatId, text);
+  return await withReconnect(() => client.sendMessage(chatId, text));
 }
 
 export async function replyToMessage(messageId, text) {
   assertReady();
-  const chats = await client.getChats();
+  const chats = await withReconnect(() => client.getChats());
   for (const chat of chats) {
-    const messages = await chat.fetchMessages({ limit: 100 });
+    const messages = await withReconnect(() => chat.fetchMessages({ limit: 100 }));
     const target = messages.find((m) => m.id._serialized === messageId);
     if (target) {
-      return await target.reply(text);
+      return await withReconnect(() => target.reply(text));
     }
   }
   throw new Error(`Message ${messageId} not found`);
@@ -730,12 +829,12 @@ export async function replyToMessage(messageId, text) {
 
 export async function reactToMessage(messageId, emoji) {
   assertReady();
-  const chats = await client.getChats();
+  const chats = await withReconnect(() => client.getChats());
   for (const chat of chats) {
-    const messages = await chat.fetchMessages({ limit: 100 });
+    const messages = await withReconnect(() => chat.fetchMessages({ limit: 100 }));
     const target = messages.find((m) => m.id._serialized === messageId);
     if (target) {
-      return await target.react(emoji);
+      return await withReconnect(() => target.react(emoji));
     }
   }
   throw new Error(`Message ${messageId} not found`);
@@ -743,12 +842,12 @@ export async function reactToMessage(messageId, emoji) {
 
 export async function deleteMessage(messageId) {
   assertReady();
-  const chats = await client.getChats();
+  const chats = await withReconnect(() => client.getChats());
   for (const chat of chats) {
-    const messages = await chat.fetchMessages({ limit: 100 });
+    const messages = await withReconnect(() => chat.fetchMessages({ limit: 100 }));
     const target = messages.find((m) => m.id._serialized === messageId);
     if (target) {
-      return await target.delete(true);
+      return await withReconnect(() => target.delete(true));
     }
   }
   throw new Error(`Message ${messageId} not found`);

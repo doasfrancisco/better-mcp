@@ -23,6 +23,19 @@ _DATE_SHORTHANDS = {
 }
 
 
+def _plain_to_html(text: str) -> str:
+    """Convert plain text to HTML with proper paragraph spacing."""
+    import html as _html
+
+    paragraphs = text.split("\n\n")
+    html_parts = []
+    for p in paragraphs:
+        escaped = _html.escape(p)
+        escaped = escaped.replace("\n", "<br>")
+        html_parts.append(f"<p>{escaped}</p>")
+    return "".join(html_parts)
+
+
 class AccountConfig:
     def __init__(self, email: str, alias: str):
         self.email = email
@@ -256,7 +269,7 @@ class GmailClient:
         alias = self._resolve_alias(account)
         service = self._get_service(alias)
 
-        message = MIMEText(body)
+        message = MIMEText(_plain_to_html(body), "html")
         message["to"] = to
         message["subject"] = subject
         if cc:
@@ -274,7 +287,7 @@ class GmailClient:
         alias = self._resolve_alias(account)
         service = self._get_service(alias)
 
-        message = MIMEText(body)
+        message = MIMEText(_plain_to_html(body), "html")
         message["to"] = to
         message["subject"] = subject
         if cc:

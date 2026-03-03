@@ -48,7 +48,7 @@ Returns stats on what was synced.`,
         content: [
           {
             type: "text",
-            text: `Contacts: ${result.contacts.synced} total, ${result.contacts.added} new, ${result.contacts.changed} changed.\nChats: ${result.chats.synced} total, ${result.chats.added} new, ${result.chats.changed} changed.`,
+            text: `Contacts: ${result.contacts.synced} total, ${result.contacts.added} new, ${result.contacts.changed} changed.\nChats: ${result.chats.synced} total, ${result.chats.added} new, ${result.chats.changed} changed, ${result.chats.updated} updated.`,
           },
         ],
       };

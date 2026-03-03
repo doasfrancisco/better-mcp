@@ -16,20 +16,20 @@ Full Gmail control with multi-account support via FastMCP.
 
 | Tool | Description |
 |------|-------------|
-| `gmail_get_profile` | Account profile info |
 | `gmail_search_messages` | Search with Gmail query syntax + date shorthands (`today`, `last_7d`, `last_30d`) |
 | `gmail_read_message` | Read email by ID |
 | `gmail_read_thread` | Read full thread |
 | `gmail_list_drafts` | List drafts |
-| `gmail_create_draft` | Create a draft |
-| `gmail_send_message` | Send an email |
-| `gmail_trash_message` | Trash one email |
+| `gmail_create_draft` | Create a draft (HTML formatting) |
+| `gmail_send_message` | Send an email (HTML formatting) |
 | `gmail_trash_messages` | Trash multiple emails across accounts in one call |
 | `gmail_tag_messages` | Add/remove/swap tags per message in one call |
 | `gmail_get_tagged` | Get emails by tag |
 | `gmail_list_tags` | List all tags |
 | `gmail_untrash_message` | Recover from trash |
 | `gmail_list_trash` | List trashed emails |
+| `gmail_unsubscribe` | Unsubscribe from mailing lists (RFC 8058 one-click) |
+| `gmail_delete_tag` | Permanently delete a tag/label |
 
 ## Multi-Account
 
