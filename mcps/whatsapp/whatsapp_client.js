@@ -210,18 +210,26 @@ export async function syncContacts() {
   assertReady();
   const contacts = await withReconnect(() => client.getContacts());
 
-  // Only saved contacts. To include all users (e.g. from groups): c.isMyContact || c.isUser
+  // Only saved contacts. Skip entries with no valid id (malformed store data
+  // causes whatsapp-web.js to throw "Data passed to getter must include an id").
   const fresh = contacts
-    .filter((c) => c.isMyContact)
-    .map((c) => ({
-      id: c.id._serialized,
-      name: c.name || null,
-      pushname: c.pushname || null,
-      number: c.number,
-      isMyContact: c.isMyContact,
-      isGroup: c.isGroup,
-      isUser: c.isUser,
-    }));
+    .filter((c) => c.id && c.isMyContact)
+    .flatMap((c) => {
+      try {
+        return [{
+          id: c.id._serialized,
+          name: c.name || null,
+          pushname: c.pushname || null,
+          number: c.number,
+          isMyContact: c.isMyContact,
+          isGroup: c.isGroup,
+          isUser: c.isUser,
+        }];
+      } catch (err) {
+        console.error(`[whatsapp] syncContacts: skipping malformed contact: ${err.message}`);
+        return [];
+      }
+    });
 
   const cached = readCache(CONTACTS_CACHE);
   if (!cached) {
@@ -270,38 +278,55 @@ export async function syncChats() {
   assertReady();
   const chats = await withReconnect(() => client.getChats());
 
-  const fresh = chats.map((c) => {
-    const chat = {
-      id: c.id._serialized,
-      name: c.name || null,
-      isGroup: c.isGroup,
-      timestamp: c.timestamp ? new Date(c.timestamp * 1000).toISOString() : null,
-      unreadCount: c.unreadCount || 0,
-      archived: c.archived || false,
-      pinned: c.pinned || false,
-    };
+  const fresh = chats
+    .filter((c) => c.id)
+    .flatMap((c) => {
+      try {
+        const chat = {
+          id: c.id._serialized,
+          name: c.name || null,
+          isGroup: c.isGroup,
+          timestamp: c.timestamp ? new Date(c.timestamp * 1000).toISOString() : null,
+          unreadCount: c.unreadCount || 0,
+          archived: c.archived || false,
+          pinned: c.pinned || false,
+        };
 
-    if (c.lastMessage) {
-      chat.lastMessage = {
-        body: c.lastMessage.body || null,
-        type: c.lastMessage.type,
-        timestamp: c.lastMessage.timestamp
-          ? new Date(c.lastMessage.timestamp * 1000).toISOString()
-          : null,
-        fromMe: c.lastMessage.fromMe || false,
-      };
-    }
+        try {
+          if (c.lastMessage) {
+            chat.lastMessage = {
+              body: c.lastMessage.body || null,
+              type: c.lastMessage.type,
+              timestamp: c.lastMessage.timestamp
+                ? new Date(c.lastMessage.timestamp * 1000).toISOString()
+                : null,
+              fromMe: c.lastMessage.fromMe || false,
+            };
+          }
+        } catch {
+          // lastMessage getter can fail on malformed message data — skip it
+        }
 
-    if (c.isGroup && c.participants) {
-      chat.participants = c.participants.map((p) => ({
-        id: p.id._serialized,
-        isAdmin: p.isAdmin || false,
-        isSuperAdmin: p.isSuperAdmin || false,
-      }));
-    }
+        try {
+          if (c.isGroup && c.participants) {
+            chat.participants = c.participants
+              .filter((p) => p.id)
+              .map((p) => ({
+                id: p.id._serialized,
+                isAdmin: p.isAdmin || false,
+                isSuperAdmin: p.isSuperAdmin || false,
+              }));
+          }
+        } catch {
+          // participants getter can fail on malformed group data — skip it
+        }
 
-    return chat;
-  });
+        return [chat];
+      } catch (err) {
+        console.error(`[whatsapp] syncChats: skipping malformed chat: ${err.message}`);
+        return [];
+      }
+    });
 
   const cached = readCache(CHATS_CACHE);
   if (!cached) {
@@ -464,13 +489,14 @@ export function find({ query, tag, from, filter } = {}) {
     results = results.filter((r) => r.tags.includes(tag));
   }
 
-  // Filter by name query
+  // Filter by name or phone number query
   if (query) {
     const q = query.toLowerCase();
     results = results.filter(
       (r) =>
         r.name?.toLowerCase().includes(q) ||
-        r.pushname?.toLowerCase().includes(q)
+        r.pushname?.toLowerCase().includes(q) ||
+        r.number?.includes(q)
     );
   }
 

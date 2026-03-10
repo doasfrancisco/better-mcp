@@ -71,7 +71,7 @@ Default tags: family, work, partner, followup. Custom tags are auto-created when
 When the user refers to someone by relationship (e.g. girlfriend, wife, coworker, brother), search by the matching tag — not by name.
 When no params are given, defaults to today's activity only.`,
   {
-    query: z.string().optional().describe("Name to search for (substring match)"),
+    query: z.string().optional().describe("Name or phone number to search for (substring match on name, pushname, and number)"),
     tag: z.string().optional().describe("Filter by tag (e.g. family, work, partner, followup)"),
     from: z.string().optional().describe("ISO date (YYYY-MM-DD) — return entries with activity on or after this date"),
     filter: z.enum(["pinned", "unread", "groups"]).optional().describe("Filter: pinned, unread, or groups only"),
