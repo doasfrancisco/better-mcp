@@ -59,7 +59,6 @@ class GmailClient:
     """Multi-account Gmail API client."""
 
     def __init__(self):
-        self._services: dict[str, object] = {}
         self._accounts: dict[str, AccountConfig] = {}
         self._alias_to_email: dict[str, str] = {}
         self._email_to_alias: dict[str, str] = {}
@@ -92,19 +91,19 @@ class GmailClient:
         return list(self._accounts.keys())
 
     def _get_service(self, alias: str):
-        """Get or create an authenticated Gmail API service for an account."""
-        if alias in self._services:
-            return self._services[alias]
+        """Build an authenticated Gmail API service for an account.
 
+        Always creates a fresh httplib2 connection to avoid stale SSL errors
+        (EOF occurred in violation of protocol) in this long-lived MCP process.
+        Cheap: static_discovery=True (default) loads from bundled JSON, no HTTP.
+        """
         creds = load_credentials(alias)
         if creds is None:
             raise RuntimeError(
                 f"No credentials for account '{alias}'. Run setup_auth.py to authenticate."
             )
 
-        service = build("gmail", "v1", credentials=creds)
-        self._services[alias] = service
-        return service
+        return build("gmail", "v1", credentials=creds)
 
     def _get_label_map(self, service) -> dict[str, str]:
         """Build label_id → label_name mapping for an account."""
@@ -343,8 +342,29 @@ class GmailClient:
 
         return {"draftId": draft["id"], "account": alias}
 
-    def send_message(self, to: str, subject: str, body: str, account: str, cc: str = "", bcc: str = "") -> dict:
-        """Send an email."""
+    def _get_reply_headers(self, service, message_id: str) -> dict:
+        """Fetch threadId and Message-ID header from an existing message for threading."""
+        msg = (
+            service.users()
+            .messages()
+            .get(
+                userId="me", id=message_id, format="metadata",
+                metadataHeaders=["Message-ID", "Message-Id"],
+            )
+            .execute()
+        )
+        headers = {h["name"].lower(): h["value"] for h in msg.get("payload", {}).get("headers", [])}
+        return {
+            "threadId": msg.get("threadId"),
+            "message_id_header": headers.get("message-id", ""),
+        }
+
+    def send_message(
+        self, to: str, subject: str, body: str, account: str,
+        cc: str = "", bcc: str = "",
+        reply_to_message_id: str | None = None,
+    ) -> dict:
+        """Send an email. If reply_to_message_id is set, sends as a thread reply."""
         alias = self._resolve_alias(account)
         service = self._get_service(alias)
 
@@ -356,8 +376,18 @@ class GmailClient:
         if bcc:
             message["bcc"] = bcc
 
+        send_body: dict = {}
+        if reply_to_message_id:
+            reply_info = self._get_reply_headers(service, reply_to_message_id)
+            if reply_info["message_id_header"]:
+                message["In-Reply-To"] = reply_info["message_id_header"]
+                message["References"] = reply_info["message_id_header"]
+            if reply_info["threadId"]:
+                send_body["threadId"] = reply_info["threadId"]
+
         raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
-        sent = service.users().messages().send(userId="me", body={"raw": raw}).execute()
+        send_body["raw"] = raw
+        sent = service.users().messages().send(userId="me", body=send_body).execute()
 
         return {"id": sent["id"], "threadId": sent.get("threadId"), "account": alias}
 

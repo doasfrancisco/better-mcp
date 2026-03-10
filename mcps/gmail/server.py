@@ -176,8 +176,9 @@ def gmail_send_message(
     account: str,
     cc: str = "",
     bcc: str = "",
+    reply_to_message_id: str | None = None,
 ) -> str:
-    """Send an email.
+    """Send an email. To reply to a thread, pass reply_to_message_id.
 
     Args:
         to: Recipient email address.
@@ -186,8 +187,9 @@ def gmail_send_message(
         account: Email or alias — required for write operations.
         cc: CC recipients (comma-separated).
         bcc: BCC recipients (comma-separated).
+        reply_to_message_id: Gmail message ID to reply to. Threads the reply automatically.
     """
-    return _json(_get_client().send_message(to, subject, body, account, cc, bcc))
+    return _json(_get_client().send_message(to, subject, body, account, cc, bcc, reply_to_message_id))
 
 
 @mcp.tool()
