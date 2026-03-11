@@ -788,19 +788,21 @@ export async function getChatMessages(chat, limit = 50) {
   const messages = await withReconnect(() => chat.fetchMessages({ limit }));
   console.error(`[whatsapp] getChatMessages: got ${messages.length} msgs, resolving contacts...`);
 
-  // Cache contacts we resolve to avoid repeated lookups for the same sender
+  // Cache contacts we resolve to avoid repeated lookups for the same sender.
+  // In group chats msg.from is the group id — use msg.author (individual sender) instead.
   const contactCache = {};
   const formatted = [];
   for (const msg of messages) {
     try {
-      if (!contactCache[msg.from]) {
+      const senderId = msg.author || msg.from;
+      if (!contactCache[senderId]) {
         const contact = await withReconnect(() => msg.getContact());
-        contactCache[msg.from] = contact.pushname || contact.name || msg.from;
+        contactCache[senderId] = contact.pushname || contact.name || senderId;
       }
       formatted.push({
         id: msg.id._serialized,
-        sender: contactCache[msg.from],
-        from: msg.from,
+        sender: contactCache[senderId],
+        from: senderId,
         body: msg.body,
         timestamp: new Date(msg.timestamp * 1000).toISOString(),
         type: msg.type,
