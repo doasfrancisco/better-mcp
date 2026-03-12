@@ -56,14 +56,11 @@ Returns stats on what was synced.`,
 
         // Default: sync contacts + chats
         const result = await wa.syncAll();
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Contacts: ${result.contacts.synced} total, ${result.contacts.added} new, ${result.contacts.changed} changed.\nChats: ${result.chats.synced} total, ${result.chats.added} new, ${result.chats.changed} changed, ${result.chats.updated} updated.`,
-            },
-          ],
-        };
+        let text = `Contacts: ${result.contacts.synced} total, ${result.contacts.added} new, ${result.contacts.changed} changed.\nChats: ${result.chats.synced} total, ${result.chats.added} new, ${result.chats.changed} changed, ${result.chats.updated} updated.`;
+        if (result.chats.updatedChats.length > 0) {
+          text += `\n\nUpdated chats:\n${JSON.stringify(result.chats.updatedChats, null, 2)}`;
+        }
+        return { content: [{ type: "text", text }] };
       } catch (err) {
         return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
       }
@@ -306,6 +303,26 @@ async function main() {
         };
         const server = createServer();
         await server.connect(transport);
+        await transport.handleRequest(req, res, req.body);
+        return;
+      }
+      // Stale session ID (e.g. server restarted) — auto-create a new session
+      // so the client doesn't need to re-initialize manually.
+      if (sessionId) {
+        console.error(`[whatsapp-mcp] Stale session ${sessionId}, auto-creating new session`);
+        const transport = new StreamableHTTPServerTransport({
+          sessionIdGenerator: () => sessionId,
+        });
+        transport.onclose = () => { delete transports[sessionId]; };
+        const server = createServer();
+        await server.connect(transport);
+        // Bypass the SDK's initialization handshake — the server and tools
+        // are fully configured after connect(), only the transport's internal
+        // _initialized flag needs to be set.
+        const inner = transport._webStandardTransport;
+        inner._initialized = true;
+        inner.sessionId = sessionId;
+        transports[sessionId] = { transport, server };
         await transport.handleRequest(req, res, req.body);
         return;
       }

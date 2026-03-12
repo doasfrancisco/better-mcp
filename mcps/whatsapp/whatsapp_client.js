@@ -338,7 +338,7 @@ export async function syncChats() {
   const cacheIndex = Object.fromEntries(cached.data.map((c) => [c.id, c]));
   let added = 0;
   let changed = 0;
-  let updated = 0;
+  const updatedChats = [];
 
   const merged = fresh.map((fc) => {
     const old = cacheIndex[fc.id];
@@ -361,7 +361,7 @@ export async function syncChats() {
 
     // Activity change (new messages or unread count changed)
     if (fc.timestamp !== old.timestamp || fc.unreadCount !== old.unreadCount) {
-      updated++;
+      updatedChats.push({ name: fc.name, id: fc.id, archived: fc.archived, unreadCount: fc.unreadCount });
     }
 
     return fc;
@@ -369,7 +369,7 @@ export async function syncChats() {
 
   const result = { lastRefresh: new Date().toISOString(), data: merged };
   writeCache(CHATS_CACHE, result);
-  return { synced: merged.length, added, changed, updated };
+  return { synced: merged.length, added, changed, updated: updatedChats.length, updatedChats };
 }
 
 /**
@@ -381,7 +381,7 @@ export async function syncAll() {
   const [contacts, chats] = await Promise.all([syncContacts(), syncChats()]);
   return {
     contacts: { synced: contacts.synced, added: contacts.added, changed: contacts.changed },
-    chats: { synced: chats.synced, added: chats.added, changed: chats.changed, updated: chats.updated },
+    chats: { synced: chats.synced, added: chats.added, changed: chats.changed, updated: chats.updated, updatedChats: chats.updatedChats },
   };
 }
 
