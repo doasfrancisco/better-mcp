@@ -278,6 +278,7 @@ NEVER summarize, paraphrase, or skip messages. Show the FULL output as-is.`,
 // ── Start ─────────────────────────────────────────────────────
 
 async function main() {
+  wa.killOrphanedChrome();
   wa.init();
 
   const app = express();

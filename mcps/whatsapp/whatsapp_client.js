@@ -68,8 +68,6 @@ export function killOrphanedChrome() {
 export function init() {
   if (client) return client;
 
-  killOrphanedChrome();
-
   const hasSession = existsSync(AUTH_MARKER);
   console.error(`[whatsapp] Session marker exists: ${hasSession}, headless: ${hasSession}`);
 
@@ -86,6 +84,16 @@ export function init() {
   });
 
   client.on("qr", (qr) => {
+    if (hasSession) {
+      // Session expired — we launched headless because the marker existed,
+      // but WhatsApp wants a new QR scan. Delete marker and reconnect with
+      // a visible browser so the user can scan.
+      console.error("[whatsapp] QR received in headless mode — session expired, reconnecting with browser...");
+      try { unlinkSync(AUTH_MARKER); } catch {}
+      reconnectAttempts = 0;
+      reconnect();
+      return;
+    }
     console.error("[whatsapp] QR code received — scan with your phone");
     console.error("[whatsapp] If no browser opened, copy this QR string into a QR viewer:");
     console.error(qr);
@@ -188,18 +196,23 @@ function assertReady() {
 
 /**
  * Wrap an async function that calls the WhatsApp API.
- * If it throws a "detached Frame" error (Puppeteer session died without
- * triggering the `disconnected` event), trigger a reconnect and throw
- * a user-friendly message instead of the raw Puppeteer error.
+ * Distinguishes between a dead session (detached Frame) — which needs a full
+ * reconnect — and stores still loading after a fresh connect — which just
+ * needs the caller to wait and retry.
  */
 async function withReconnect(fn) {
   try {
     return await fn();
   } catch (err) {
-    if (err.message?.includes("detached Frame") || err.message?.includes("Session closed")) {
+    const msg = err.message || "";
+    if (msg.includes("detached Frame") || msg.includes("Session closed")) {
       console.error("[whatsapp] Detached frame detected — triggering reconnect");
       reconnect();
       throw new Error("WhatsApp session lost — reconnecting automatically. Try again in a few seconds.");
+    }
+    if (msg.includes("is not a function") || msg.includes("Cannot read properties")) {
+      console.error(`[whatsapp] Stores still loading: ${msg}`);
+      throw new Error("WhatsApp is still loading after reconnect — try again in 10-15 seconds.");
     }
     throw err;
   }
