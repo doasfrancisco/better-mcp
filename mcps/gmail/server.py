@@ -1,12 +1,15 @@
 """Gmail MCP Server — full Gmail control with multi-account support."""
 
 import json
+import webbrowser
+from contextlib import asynccontextmanager
 from typing import Annotated
 
 from fastmcp import FastMCP
 from pydantic import BaseModel, BeforeValidator, model_validator
 
 from gmail_client import GmailClient
+from setup_server import is_setup_complete, needs_setup, start_setup_server
 
 
 def _parse_json_str(v):
@@ -48,8 +51,24 @@ class TagOp(BaseModel):
 MessagesList = Annotated[list[MessageRef], BeforeValidator(_parse_json_str)]
 TagOpList = Annotated[list[TagOp], BeforeValidator(_parse_json_str)]
 
+
+# ── Auto-setup on first run ───────────────────────────────────────────
+
+_setup_port: int | None = None
+
+
+@asynccontextmanager
+async def _lifespan(server):
+    global _setup_port
+    if needs_setup():
+        _setup_port = start_setup_server()
+        webbrowser.open(f"http://localhost:{_setup_port}")
+    yield
+
+
 mcp = FastMCP(
     "Gmail",
+    lifespan=_lifespan,
     instructions="""IMPORTANT: Always discover a tool's schema with ToolSearch BEFORE calling it for the first time.
 
 Before executing any write operation (trash, tag, send, create draft), always tell the user exactly what you're about to do and STOP your turn. Do NOT call the tool in the same message. Wait for the user to reply with confirmation before making the call.
@@ -78,7 +97,22 @@ _client: GmailClient | None = None
 
 
 def _get_client() -> GmailClient:
+    """Get the Gmail client, or raise a setup message if not configured."""
     global _client
+    if needs_setup():
+        if _setup_port and not is_setup_complete():
+            raise RuntimeError(
+                f"Gmail setup in progress. Complete the setup in your browser "
+                f"(http://localhost:{_setup_port}), then try again."
+            )
+        if needs_setup():
+            # Setup server not running or setup failed — start it
+            port = start_setup_server()
+            webbrowser.open(f"http://localhost:{port}")
+            raise RuntimeError(
+                f"Gmail is not configured. A setup page opened in your browser "
+                f"(http://localhost:{port}). Add your Gmail accounts there, then try again."
+            )
     if _client is None:
         _client = GmailClient()
     return _client

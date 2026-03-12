@@ -4,13 +4,36 @@ Full Gmail control with multi-account support via FastMCP.
 
 ## Setup
 
-1. **Google Cloud Console** — Enable Gmail API, create OAuth 2.0 Desktop credentials, save as `credentials/credentials.json`
-2. **Accounts** — `cp accounts.json.example accounts.json` and fill in your emails
-3. **Authenticate** — `uv run python setup_auth.py` (opens browser per account)
-4. **Add to Claude Code:**
-   ```bash
-   claude mcp add -s user gmail -- uv run --directory /path/to/gmail fastmcp run server.py
-   ```
+### 1. Google OAuth credentials (one-time)
+
+Go to [Google Cloud Console](https://console.cloud.google.com):
+1. Create a project → Enable **Gmail API**
+2. Go to **Credentials** → Create **OAuth client ID** (Desktop app)
+3. Download the JSON → save as `credentials/credentials.json`
+
+> If configuring consent screen: choose External, add your email as test user, add Gmail API scope.
+
+### 2. Add to Claude Code
+
+```bash
+claude mcp add -s user gmail -- uv run --directory /path/to/mcps/gmail fastmcp run server.py
+```
+
+Or for Claude Desktop, add to `claude_desktop_config.json`:
+```json
+{
+  "mcpServers": {
+    "gmail": {
+      "command": "uv",
+      "args": ["run", "--directory", "/path/to/mcps/gmail", "fastmcp", "run", "server.py"]
+    }
+  }
+}
+```
+
+### 3. Use it
+
+The first time you use a Gmail tool, a setup page opens in your browser. Add your Gmail accounts there — sign in with Google, pick an alias (personal, work, etc.), done.
 
 ## Tools
 
