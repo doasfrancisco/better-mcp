@@ -26,7 +26,10 @@ let client = null;
 let ready = false;
 let reconnecting = false;
 let reconnectAttempts = 0;
+let readyTimer = null;
 const MAX_RECONNECT_ATTEMPTS = 3;
+const READY_TIMEOUT_MS = 30_000;
+const DESTROY_TIMEOUT_MS = 10_000;
 
 // ── Orphan cleanup ────────────────────────────────────────────
 // On Windows, SIGTERM kills the process unconditionally — the graceful
@@ -104,6 +107,14 @@ export function init() {
     try {
       writeFileSync(AUTH_MARKER, new Date().toISOString());
     } catch {}
+    // If ready doesn't fire within 30s after auth, stores are hung — retry
+    clearTimeout(readyTimer);
+    readyTimer = setTimeout(() => {
+      if (!ready) {
+        console.error("[whatsapp] Ready timeout — authenticated but stores never loaded, retrying");
+        reconnect();
+      }
+    }, READY_TIMEOUT_MS);
   });
 
   client.on("auth_failure", (msg) => {
@@ -119,6 +130,7 @@ export function init() {
 
   client.on("ready", () => {
     console.error("[whatsapp] Client ready");
+    clearTimeout(readyTimer);
     ready = true;
     reconnecting = false;
     reconnectAttempts = 0;
@@ -132,6 +144,11 @@ export function init() {
 
   client.initialize().catch((err) => {
     console.error("[whatsapp] Initialize error:", err.message);
+    // Only retry if we had a valid session — if QR was needed, don't loop
+    if (!ready && existsSync(AUTH_MARKER)) {
+      console.error("[whatsapp] Initialize failed with valid session — retrying");
+      reconnect();
+    }
   });
 
   return client;
@@ -153,13 +170,19 @@ async function reconnect() {
   }
 
   reconnecting = true;
+  clearTimeout(readyTimer);
   console.error(`[whatsapp] Reconnecting (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`);
 
   if (client) {
     try {
-      await client.destroy();
+      await Promise.race([
+        client.destroy(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("destroy timeout")), DESTROY_TIMEOUT_MS)),
+      ]);
     } catch (err) {
-      console.error("[whatsapp] Error destroying client:", err.message);
+      // Graceful destroy failed or timed out — force-kill Chrome
+      console.error(`[whatsapp] Graceful destroy failed: ${err.message} — force-killing Chrome`);
+      killOrphanedChrome();
     }
     client = null;
   }
@@ -174,6 +197,7 @@ export function isReady() {
 }
 
 export async function destroy() {
+  clearTimeout(readyTimer);
   if (client) {
     await client.destroy();
     client = null;
@@ -183,36 +207,59 @@ export async function destroy() {
 
 function assertReady() {
   if (reconnecting) {
-    throw new Error("WhatsApp is reconnecting — try again in a few seconds.");
+    throw new Error(
+      `WhatsApp is reconnecting (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}) — try again in ~15 seconds.`
+    );
+  }
+  if (!ready && reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+    throw new Error(
+      "WhatsApp reconnection failed after all retries. Restart the MCP server to recover."
+    );
+  }
+  if (!ready && client) {
+    throw new Error(
+      "WhatsApp client is initializing — try again in ~15 seconds."
+    );
   }
   if (!ready) {
     throw new Error(
-      "WhatsApp client is not connected yet. " +
-        "If this is the first run, a browser window should open for QR scanning. " +
-        "Wait for authentication to complete and try again."
+      "WhatsApp client is not running. Restart the MCP server."
     );
   }
 }
 
 /**
  * Wrap an async function that calls the WhatsApp API.
- * Distinguishes between a dead session (detached Frame) — which needs a full
- * reconnect — and stores still loading after a fresh connect — which just
- * needs the caller to wait and retry.
+ * - Timeout: if the call hangs (Chrome zombied), fail after 30s and reconnect.
+ * - Detached frame / session closed: full reconnect.
+ * - Stores still loading: tell caller to retry.
  */
+const API_TIMEOUT_MS = 30_000;
+
 async function withReconnect(fn) {
   try {
-    return await fn();
+    return await Promise.race([
+      fn(),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("API call timeout")), API_TIMEOUT_MS)
+      ),
+    ]);
   } catch (err) {
     const msg = err.message || "";
+    if (msg === "API call timeout") {
+      console.error("[whatsapp] API call timed out — Chrome may be unresponsive, reconnecting");
+      ready = false;
+      reconnect();
+      throw new Error("WhatsApp API timed out — reconnecting. Try again in ~30 seconds.");
+    }
     if (msg.includes("detached Frame") || msg.includes("Session closed")) {
       console.error("[whatsapp] Detached frame detected — triggering reconnect");
       reconnect();
-      throw new Error("WhatsApp session lost — reconnecting automatically. Try again in a few seconds.");
+      throw new Error("WhatsApp session lost — reconnecting. Try again in ~15 seconds.");
     }
     if (msg.includes("is not a function") || msg.includes("Cannot read properties")) {
       console.error(`[whatsapp] Stores still loading: ${msg}`);
-      throw new Error("WhatsApp is still loading after reconnect — try again in 10-15 seconds.");
+      throw new Error("WhatsApp is still loading — try again in ~15 seconds.");
     }
     throw err;
   }
