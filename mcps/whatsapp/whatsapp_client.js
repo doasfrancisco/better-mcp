@@ -345,12 +345,41 @@ const CONTACT_TRACKED_FIELDS = ["name", "pushname", "number"];
  */
 export async function syncContacts() {
   assertReady();
-  const contacts = await withReconnect(() => client.getContacts());
+  // Bypass client.getContacts() — it crashes inside page.evaluate when any
+  // contact in the Store has an undefined id (whatsapp-web.js calls serialize()
+  // which hits a memoize getter that requires id). Instead, run our own evaluate
+  // that filters out malformed entries before getContactModel touches them.
+  const { contacts: rawContacts, skippedInBrowser } = await withReconnect(() =>
+    client.pupPage.evaluate(() => {
+      const models = window.Store.Contact.getModelsArray();
+      const contacts = [];
+      const skippedInBrowser = [];
+      for (const c of models) {
+        try {
+          if (!c.id) {
+            let info;
+            try { info = { name: c.name, pushname: c.pushname, number: c.number }; } catch { info = "unreadable"; }
+            skippedInBrowser.push({ error: "missing id", info });
+            continue;
+          }
+          contacts.push(window.WWebJS.getContactModel(c));
+        } catch (e) {
+          let info;
+          try { info = { id: c.id?._serialized, name: c.name, pushname: c.pushname, number: c.number }; } catch { info = "unreadable"; }
+          skippedInBrowser.push({ error: e.message, info });
+        }
+      }
+      return { contacts, skippedInBrowser };
+    })
+  );
+  if (skippedInBrowser.length) {
+    console.error(`[whatsapp] syncContacts: ${skippedInBrowser.length} contacts skipped in browser`, skippedInBrowser);
+  }
+  const contacts = rawContacts;
 
-  // Only saved contacts. Skip entries with no valid id (malformed store data
-  // causes whatsapp-web.js to throw "Data passed to getter must include an id").
-  // Filter is inside flatMap because even property access on proxy objects can throw.
-  const skippedEntries = [];
+  // Filter to saved contacts only. The flatMap also catches any remaining
+  // serialization issues that survived the browser-side filter.
+  const skippedEntries = [...skippedInBrowser];
   const fresh = contacts.flatMap((c) => {
     try {
       if (!c.id || !c.isMyContact) return [];
@@ -358,7 +387,7 @@ export async function syncContacts() {
         id: c.id._serialized,
         name: c.name || null,
         pushname: c.pushname || null,
-        number: c.number,
+        number: c.userid || c.number,
         isMyContact: c.isMyContact,
         isGroup: c.isGroup,
         isUser: c.isUser,
