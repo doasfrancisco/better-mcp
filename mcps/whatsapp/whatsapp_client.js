@@ -29,7 +29,7 @@ const READY_TIMEOUT_MS = 15_000;
 const DESTROY_TIMEOUT_MS = 10_000;
 const RECONNECT_DEBOUNCE_MS = 5_000;
 const STABILITY_MS = 15_000;
-const WAIT_FOR_READY_MS = 15_000;
+const WAIT_FOR_READY_MS = 45_000;
 const DEAD_RECOVERY_MS = 60_000;
 
 // Explicit state machine — replaces the old boolean flags (ready, reconnecting)
