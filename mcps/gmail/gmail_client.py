@@ -2,10 +2,11 @@
 
 import base64
 import json
+import mimetypes
 import re
 import urllib.request
 from datetime import datetime, timezone
-from email.mime.text import MIMEText
+from email.message import EmailMessage
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 
@@ -155,6 +156,7 @@ class GmailClient:
         for part in payload.get("parts", []):
             if part.get("filename"):
                 attachments.append({
+                    "attachmentId": part.get("body", {}).get("attachmentId", ""),
                     "filename": part["filename"],
                     "mimeType": part.get("mimeType", ""),
                     "size": part.get("body", {}).get("size", 0),
@@ -309,6 +311,18 @@ class GmailClient:
             messages.append(formatted)
         return {"threadId": thread_id, "account": alias, "messages": messages}
 
+    def get_attachment_content(self, message_id: str, attachment_id: str, account: str) -> dict:
+        """Download an attachment's binary content (base64url-encoded)."""
+        alias = self._resolve_alias(account)
+        service = self._get_service(alias)
+        att = service.users().messages().attachments().get(
+            userId="me", messageId=message_id, id=attachment_id
+        ).execute()
+        return {
+            "data": att["data"],
+            "size": att.get("size", 0),
+        }
+
     def list_drafts(self, account: str | None = None) -> list[dict]:
         """List draft emails. If account is None, lists from all accounts."""
         aliases = [self._resolve_alias(account)] if account else self._get_all_aliases()
@@ -326,19 +340,44 @@ class GmailClient:
 
         return results
 
-    def create_draft(self, to: str, subject: str, body: str, account: str, cc: str = "", bcc: str = "") -> dict:
+    def _build_message(
+        self, to: str, subject: str, body: str,
+        cc: str = "", bcc: str = "", attachments: list[str] | None = None,
+    ) -> EmailMessage:
+        """Build an EmailMessage with optional attachments (any file type)."""
+        msg = EmailMessage()
+        msg["To"] = to
+        msg["Subject"] = subject
+        if cc:
+            msg["Cc"] = cc
+        if bcc:
+            msg["Bcc"] = bcc
+        msg.set_content(_plain_to_html(body), subtype="html")
+
+        for file_path in (attachments or []):
+            path = Path(file_path)
+            if not path.exists():
+                raise FileNotFoundError(f"Attachment not found: {path}")
+            mime_type, _ = mimetypes.guess_type(str(path))
+            mime_type = mime_type or "application/octet-stream"
+            maintype, subtype = mime_type.split("/", 1)
+            msg.add_attachment(
+                path.read_bytes(),
+                maintype=maintype, subtype=subtype,
+                filename=path.name,
+            )
+
+        return msg
+
+    def create_draft(
+        self, to: str, subject: str, body: str, account: str,
+        cc: str = "", bcc: str = "", attachments: list[str] | None = None,
+    ) -> dict:
         """Create a draft email."""
         alias = self._resolve_alias(account)
         service = self._get_service(alias)
 
-        message = MIMEText(_plain_to_html(body), "html")
-        message["to"] = to
-        message["subject"] = subject
-        if cc:
-            message["cc"] = cc
-        if bcc:
-            message["bcc"] = bcc
-
+        message = self._build_message(to, subject, body, cc, bcc, attachments)
         raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
         draft = service.users().drafts().create(userId="me", body={"message": {"raw": raw}}).execute()
 
@@ -365,18 +404,13 @@ class GmailClient:
         self, to: str, subject: str, body: str, account: str,
         cc: str = "", bcc: str = "",
         reply_to_message_id: str | None = None,
+        attachments: list[str] | None = None,
     ) -> dict:
         """Send an email. If reply_to_message_id is set, sends as a thread reply."""
         alias = self._resolve_alias(account)
         service = self._get_service(alias)
 
-        message = MIMEText(_plain_to_html(body), "html")
-        message["to"] = to
-        message["subject"] = subject
-        if cc:
-            message["cc"] = cc
-        if bcc:
-            message["bcc"] = bcc
+        message = self._build_message(to, subject, body, cc, bcc, attachments)
 
         send_body: dict = {}
         if reply_to_message_id:

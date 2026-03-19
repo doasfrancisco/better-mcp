@@ -172,6 +172,20 @@ def gmail_read_thread(thread_id: str, account: str) -> str:
 
 
 @mcp.tool()
+def gmail_get_attachment(message_id: str, attachment_id: str, account: str) -> str:
+    """Download an attachment's content (base64url-encoded).
+
+    Use gmail_read_message first to get the attachment IDs from the attachments list.
+
+    Args:
+        message_id: Gmail message ID containing the attachment.
+        attachment_id: Attachment ID from gmail_read_message's attachments list.
+        account: Email or alias.
+    """
+    return _json(_get_client().get_attachment_content(message_id, attachment_id, account))
+
+
+@mcp.tool()
 def gmail_list_drafts(account: str | None = None) -> str:
     """List draft emails.
 
@@ -189,6 +203,7 @@ def gmail_create_draft(
     account: str,
     cc: str = "",
     bcc: str = "",
+    attachments: list[str] | None = None,
 ) -> str:
     """Create a new draft email.
 
@@ -199,8 +214,9 @@ def gmail_create_draft(
         account: Email or alias — required for write operations.
         cc: CC recipients (comma-separated).
         bcc: BCC recipients (comma-separated).
+        attachments: List of absolute file paths to attach (PDF, images, videos, any file type).
     """
-    return _json(_get_client().create_draft(to, subject, body, account, cc, bcc))
+    return _json(_get_client().create_draft(to, subject, body, account, cc, bcc, attachments))
 
 
 @mcp.tool()
@@ -212,6 +228,7 @@ def gmail_send_message(
     cc: str = "",
     bcc: str = "",
     reply_to_message_id: str | None = None,
+    attachments: list[str] | None = None,
 ) -> str:
     """Send an email. To reply to a thread, pass reply_to_message_id.
 
@@ -223,8 +240,9 @@ def gmail_send_message(
         cc: CC recipients (comma-separated).
         bcc: BCC recipients (comma-separated).
         reply_to_message_id: Gmail message ID to reply to. Threads the reply automatically.
+        attachments: List of absolute file paths to attach (PDF, images, videos, any file type).
     """
-    return _json(_get_client().send_message(to, subject, body, account, cc, bcc, reply_to_message_id))
+    return _json(_get_client().send_message(to, subject, body, account, cc, bcc, reply_to_message_id, attachments))
 
 
 @mcp.tool()

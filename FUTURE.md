@@ -30,7 +30,7 @@
 - **Gmail: improve tool discoverability** — Claude guesses wrong param names when calling tools it hasn't discovered via `ToolSearch` first (e.g. `message_ids` instead of `messages`, `tag` as top-level instead of per-message). Improve docstrings to be more explicit about the schema, or explore ways to make the tool signatures self-evident so even undiscovered calls are less error-prone.
 - **Gmail: send-as alias management** — Add `gmail.settings.sharing` scope and a `gmail_config` tool to manage send-as aliases from the MCP (list, add, remove). Requires re-auth of affected accounts after adding the scope.
 - **Gmail: forward message** — Add `gmail_forward_message` tool. Forward an email to new recipients with proper `Fwd:` subject, quoted forwarded-message block (From/Date/Subject/To headers), HTML support, and threading headers. Currently users can't forward emails through the MCP at all. Inspired by GWS CLI's `+forward` command. See `docs/gmail-comparison-gws-cli.md`.
-- **Gmail: download attachments** — Add `gmail_get_attachment` tool to download email attachments to local filesystem. We show attachment metadata but can't retrieve the actual files, blocking "save this PDF" workflows.
+- **Gmail: save attachment to disk** — `gmail_get_attachment` returns base64 data. Add an option to save directly to a local file path instead of returning raw data, for large attachments.
 - **Gmail: reply-all recipient resolution** — Enhance `gmail_send_message` (or add dedicated mode) to auto-resolve all original To/CC recipients when replying, with deduplication and self-exclusion. Currently the AI has to manually extract recipients from the read result.
 
 ### Gmail: tool consolidation
