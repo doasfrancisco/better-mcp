@@ -5,10 +5,13 @@ import json
 import mimetypes
 import re
 import urllib.request
-from datetime import datetime, timezone
 from email.message import EmailMessage
 from email.utils import parsedate_to_datetime
+from io import BytesIO
 from pathlib import Path
+
+import docx
+import pdfplumber
 
 from googleapiclient.discovery import build
 
@@ -162,11 +165,22 @@ class GmailClient:
                 return body
         return ""
 
+    @staticmethod
+    def _is_inline(part: dict) -> bool:
+        """Check if a part is an inline/embedded image (not a real attachment)."""
+        headers = {h["name"].lower(): h["value"] for h in part.get("headers", [])}
+        disposition = headers.get("content-disposition", "")
+        if disposition.lower().startswith("inline"):
+            return True
+        if "content-id" in headers:
+            return True
+        return False
+
     def _get_attachments_list(self, payload: dict) -> list[dict]:
-        """List attachment metadata from a message payload."""
+        """List real attachment metadata, filtering out inline/embedded images."""
         attachments = []
         for part in payload.get("parts", []):
-            if part.get("filename"):
+            if part.get("filename") and not self._is_inline(part):
                 attachments.append({
                     "attachmentId": part.get("body", {}).get("attachmentId", ""),
                     "filename": part["filename"],
@@ -304,14 +318,78 @@ class GmailClient:
         self._mark_as_read(unsorted)
         return {"results": unsorted, "ai_skipped": skipped_counts}
 
+    _MAX_AUTO_READ = 5 * 1024 * 1024  # 5 MB
+
+    _READABLE_EXTENSIONS = {".pdf", ".docx"}
+
+    @staticmethod
+    def _is_readable(att: dict) -> bool:
+        """Check if an attachment can be read inline (text extracted)."""
+        filename = att["filename"].lower()
+        if any(filename.endswith(ext) for ext in GmailClient._READABLE_EXTENSIONS):
+            return True
+        return att["mimeType"].startswith("text/")
+
+    def _read_attachment_content(self, service, message_id: str, att: dict) -> None:
+        """Fetch and decode a readable attachment, adding 'content' in-place."""
+        if not att.get("attachmentId"):
+            return
+        raw = service.users().messages().attachments().get(
+            userId="me", messageId=message_id, id=att["attachmentId"]
+        ).execute()
+        data = base64.urlsafe_b64decode(raw["data"] + "==")
+
+        filename = att["filename"].lower()
+        if filename.endswith(".pdf"):
+            try:
+                with pdfplumber.open(BytesIO(data)) as pdf:
+                    att["content"] = "\n".join(
+                        page.extract_text() or "" for page in pdf.pages
+                    )
+            except Exception:
+                att["password_protected"] = True
+        elif filename.endswith(".docx"):
+            doc = docx.Document(BytesIO(data))
+            att["content"] = "\n".join(p.text for p in doc.paragraphs)
+        elif att["mimeType"].startswith("text/"):
+            att["content"] = data.decode("utf-8", errors="replace")
+
+    def read_pdf_with_password(
+        self, message_id: str, attachment_id: str, password: str, account: str,
+    ) -> str:
+        """Re-fetch a password-protected PDF and extract text."""
+        alias = self._resolve_alias(account)
+        service = self._get_service(alias)
+        raw = service.users().messages().attachments().get(
+            userId="me", messageId=message_id, id=attachment_id
+        ).execute()
+        data = base64.urlsafe_b64decode(raw["data"] + "==")
+        with pdfplumber.open(BytesIO(data), password=password) as pdf:
+            return "\n".join(page.extract_text() or "" for page in pdf.pages)
+
     def read_message(self, message_id: str, account: str) -> dict:
-        """Read a specific email by ID."""
+        """Read a specific email by ID.
+
+        Readable attachments < 5 MB (PDF, docx, text/*) have content extracted inline.
+        Everything else is marked downloadable for the caller to handle via elicitation.
+        """
         alias = self._resolve_alias(account)
         service = self._get_service(alias)
         msg = service.users().messages().get(userId="me", id=message_id, format="full").execute()
         formatted = self._format_message(msg, alias)
         formatted["body"] = self._get_body(msg.get("payload", {}))
-        formatted["attachments"] = self._get_attachments_list(msg.get("payload", {}))
+
+        attachments = self._get_attachments_list(msg.get("payload", {}))
+        for att in attachments:
+            if self._is_readable(att) and att["size"] < self._MAX_AUTO_READ:
+                self._read_attachment_content(service, message_id, att)
+                if "content" in att:
+                    del att["attachmentId"]
+                # else: password_protected or failed — keep attachmentId
+            else:
+                att["downloadable"] = True
+
+        formatted["attachments"] = attachments
         return formatted
 
     def read_thread(self, thread_id: str, account: str) -> dict:
@@ -326,17 +404,23 @@ class GmailClient:
             messages.append(formatted)
         return {"threadId": thread_id, "account": alias, "messages": messages}
 
-    def get_attachment_content(self, message_id: str, attachment_id: str, account: str) -> dict:
-        """Download an attachment's binary content (base64url-encoded)."""
+    def download_attachment(
+        self, message_id: str, attachment_id: str, filename: str, account: str,
+    ) -> dict:
+        """Download an attachment to ~/Downloads/. Returns the saved file path."""
         alias = self._resolve_alias(account)
         service = self._get_service(alias)
         att = service.users().messages().attachments().get(
             userId="me", messageId=message_id, id=attachment_id
         ).execute()
-        return {
-            "data": att["data"],
-            "size": att.get("size", 0),
-        }
+        data = base64.urlsafe_b64decode(att["data"] + "==")
+
+        downloads = Path.home() / "Downloads"
+        downloads.mkdir(exist_ok=True)
+        dest = downloads / filename
+        dest.write_bytes(data)
+
+        return {"path": str(dest), "size": len(data), "account": alias}
 
     def list_drafts(self, account: str | None = None) -> list[dict]:
         """List draft emails. If account is None, lists from all accounts."""

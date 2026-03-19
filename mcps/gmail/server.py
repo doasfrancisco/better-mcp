@@ -5,7 +5,7 @@ import webbrowser
 from contextlib import asynccontextmanager
 from typing import Annotated
 
-from fastmcp import FastMCP
+from fastmcp import Context, FastMCP
 from pydantic import BaseModel, BeforeValidator, model_validator
 
 from gmail_client import BUILTIN_TAGS, GmailClient
@@ -91,6 +91,11 @@ Auto-sorted emails:
 - gmail_search_messages automatically skips ai/* emails by default and returns their counts in "ai_skipped".
 - Always show the ai_skipped summary to the user (e.g. "Also sorted: ai/programming (1), ai/finance (3)").
 - When the user asks to "show all" or explicitly wants auto-sorted emails, set skip_ai=false.
+
+Attachments:
+- When gmail_read_message downloads attachments, immediately read them using the Read tool — do NOT ask the user first. The "hint" field in each attachment tells you the file path to read.
+- Reading is not a write operation — no confirmation needed.
+- For binary files (Excel .xlsx, .pptx, etc.), the Read tool won't work. Use Python (openpyxl, pandas) or the appropriate skill to read them instead.
 """,
 )
 
@@ -149,15 +154,76 @@ def gmail_search_messages(
     return _json(_get_client().search_messages(query, date, from_email, max_results, account, skip_ai))
 
 
+_BINARY_EXTENSIONS = {".xlsx", ".xls", ".pptx", ".doc", ".zip", ".rar", ".7z", ".tar", ".gz"}
+
+
+def _download_hint(filename: str, path: str) -> str:
+    ext = filename.lower().rsplit(".", 1)[-1] if "." in filename else ""
+    if f".{ext}" in _BINARY_EXTENSIONS:
+        return f"Binary file saved to '{path}'. Use Python (openpyxl, etc.) or the appropriate skill to read it."
+    return f"Use the Read tool on '{path}' to view this file."
+
+
+def _format_size(size: int) -> str:
+    if size >= 1024 * 1024:
+        return f"{size / (1024 * 1024):.1f} MB"
+    if size >= 1024:
+        return f"{size / 1024:.1f} KB"
+    return f"{size} B"
+
+
 @mcp.tool()
-def gmail_read_message(message_id: str, account: str) -> str:
-    """Read a specific email by message ID. Returns headers, body, and attachments list.
+async def gmail_read_message(message_id: str, account: str, ctx: Context) -> str:
+    """Read a specific email by message ID. Returns headers, body, and attachments.
+
+    Readable attachments (PDF, Word, text < 5 MB) are extracted inline.
+    Other files (images, Excel, archives, video) prompt you to download to ~/Downloads/.
 
     Args:
         message_id: The Gmail message ID (from search results).
         account: Email or alias — required to identify which account owns this message.
     """
-    return _json(_get_client().read_message(message_id, account))
+    client = _get_client()
+    result = client.read_message(message_id, account)
+
+    # Handle password-protected PDFs
+    protected = [a for a in result["attachments"] if a.get("password_protected")]
+    for att in protected:
+        pw_result = await ctx.elicit(
+            f"'{att['filename']}' is password-protected. Enter the password to read it:",
+            response_type=str,
+        )
+        if pw_result.action == "accept":
+            try:
+                att["content"] = client.read_pdf_with_password(
+                    message_id, att["attachmentId"], pw_result.data, account,
+                )
+                del att["attachmentId"]
+                del att["password_protected"]
+            except Exception:
+                att["error"] = "Wrong password or unreadable PDF"
+
+    # Handle downloadable attachments
+    downloadable = [a for a in result["attachments"] if a.get("downloadable")]
+    if downloadable:
+        file_list = "\n".join(
+            f"- {a['filename']} ({_format_size(a['size'])})" for a in downloadable
+        )
+        elicit_result = await ctx.elicit(
+            f"This email has files that can be downloaded:\n{file_list}\n\nSave to ~/Downloads?",
+            response_type=None,
+        )
+        if elicit_result.action == "accept":
+            for a in downloadable:
+                dl = client.download_attachment(
+                    message_id, a["attachmentId"], a["filename"], account,
+                )
+                a["downloaded_to"] = dl["path"]
+                a["hint"] = _download_hint(a["filename"], dl["path"])
+                del a["attachmentId"]
+                del a["downloadable"]
+
+    return _json(result)
 
 
 @mcp.tool()
@@ -172,17 +238,20 @@ def gmail_read_thread(thread_id: str, account: str) -> str:
 
 
 @mcp.tool()
-def gmail_get_attachment(message_id: str, attachment_id: str, account: str) -> str:
-    """Download an attachment's content (base64url-encoded).
-
-    Use gmail_read_message first to get the attachment IDs from the attachments list.
+def gmail_download_attachment(
+    message_id: str, attachment_id: str, filename: str, account: str,
+) -> str:
+    """Save an attachment to ~/Downloads/.
 
     Args:
         message_id: Gmail message ID containing the attachment.
         attachment_id: Attachment ID from gmail_read_message's attachments list.
+        filename: Filename to save as (from the attachments list).
         account: Email or alias.
     """
-    return _json(_get_client().get_attachment_content(message_id, attachment_id, account))
+    result = _get_client().download_attachment(message_id, attachment_id, filename, account)
+    result["hint"] = _download_hint(filename, result["path"])
+    return _json(result)
 
 
 @mcp.tool()

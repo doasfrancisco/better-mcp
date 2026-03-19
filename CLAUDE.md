@@ -10,6 +10,10 @@ See [HOOKS.md](HOOKS.md) for Claude Code hooks patterns (sound effects, skill ho
 
 See [LEGACY.md](LEGACY.md) for the removed build pipeline (build-mcps, generate-mcp-config, config templates).
 
+## Python MCPs
+
+All Python MCP servers use **uv** for dependency management. Use `uv add <package>` to install dependencies (not pip). Each MCP has its own `pyproject.toml` and `.venv/`.
+
 ## WhatsApp MCP
 
 Architecture pattern: **cache-first**. Always build logic that caches data locally before hitting the API. Every call goes through the WhatsApp Web bridge to the phone — excessive calls trigger rate limits or bans. Minimize API calls by caching contacts, chat lists, and other stable data to local JSON files.
