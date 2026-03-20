@@ -1,15 +1,46 @@
 {
-  "name": "whatsapp-mcp-server",
+  "name": "whatsapp-electron",
   "version": "1.0.0",
+  "description": "WhatsApp Desktop with built-in MCP server",
+  "main": "main.js",
   "type": "module",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --inspect",
+    "dist": "electron-builder --win"
+  },
   "engines": {
     "node": ">=20"
+  },
+  "build": {
+    "appId": "com.francisco.whatsapp",
+    "productName": "WhatsApp AI",
+    "win": {
+      "target": "dir",
+      "icon": "icon.ico"
+    },
+    "asar": false,
+    "files": [
+      "main.js",
+      "preload.cjs",
+      "inject.js",
+      "mcp-server.js",
+      "cache.js",
+      "icon.png",
+      "icon.ico",
+      "node_modules/**/*"
+    ],
+    "extraResources": []
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.27.1",
     "cors": "^2.8.6",
+    "electron-context-menu": "^4.0.4",
     "express": "^5.2.1",
-    "whatsapp-web.js": "^1.34.6",
     "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "electron": "^35.0.0",
+    "electron-builder": "^26.8.1"
   }
 }

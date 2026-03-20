@@ -1,41 +1,58 @@
-# WhatsApp MCP Server
+# WhatsApp AI
 
-MCP server for reading WhatsApp messages and contacts via `whatsapp-web.js`.
+Electron app wrapping WhatsApp Web with a built-in MCP server. Replaces the old Puppeteer-based WhatsApp MCP.
+
+Opening the app = MCP server is live on port 39571. No hooks, no separate processes.
 
 ## Setup
 
 ```bash
 cd mcps/whatsapp
 npm install
+npm run dist
 ```
 
-## First run — QR authentication
+First run: scan the QR code with your phone (WhatsApp Settings → Linked Devices). Session persists across restarts.
+
+## Launching
+
+### Option 1: Built .exe (recommended)
+
+Run `dist/win-unpacked/WhatsApp AI.exe`. Pin to taskbar or create a desktop shortcut.
+
+### Option 2: Terminal
 
 ```bash
-node server.js
+cd mcps/whatsapp && npm start
 ```
 
-A Chromium window opens with a QR code. Scan it with WhatsApp on your phone (Settings → Linked Devices → Link a Device). After scanning, the session is saved to `.wwebjs_auth/` and subsequent runs reconnect headlessly.
-
-## Register with Claude Code
+### Rebuilding after code changes
 
 ```bash
-claude mcp add -s user whatsapp -- node C:/Francisco/github-repositories/mcp_servers/mcps/whatsapp/server.js
+npm run dist
 ```
 
-Then restart Claude Code.
+## MCP config
+
+Claude Code connects to `http://localhost:39571/mcp`:
+
+```json
+{
+  "mcpServers": {
+    "whatsapp": {
+      "type": "http",
+      "url": "http://localhost:39571/mcp"
+    }
+  }
+}
+```
 
 ## Tools
 
 | Tool | Description |
 |------|-------------|
-| `whatsapp_sync` | Sync data from the API. No params syncs contacts+chats. `what: "messages"` syncs messages for specific chats. |
-| `whatsapp_find` | Find people or groups by name, tag, date, or filter. Cache-only. |
-| `whatsapp_get_messages` | Get cached messages from a chat. Cache-only. |
-| `whatsapp_tag_contacts` | Add or remove tags from contacts/groups. |
-
-Write tools (send, reply, react, delete) are defined but commented out in `server.js` — uncomment when ready.
-
-## Re-authentication
-
-If the session expires, delete `.wwebjs_auth/` and run `node server.js` again to re-scan the QR.
+| `whatsapp_sync` | Sync contacts/chats/messages from WhatsApp into local cache |
+| `whatsapp_find` | Search contacts and chats by name, tag, date, or filter |
+| `whatsapp_get_messages` | Read cached messages (no API calls) |
+| `whatsapp_tag_contacts` | Add/remove tags on contacts |
+| `whatsapp_send` | Send a text message (safe — uses official WhatsApp Web) |
