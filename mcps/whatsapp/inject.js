@@ -228,13 +228,21 @@
             const senderId = authorId || fromId;
             const senderName = m.senderObj?.pushname || m.senderObj?.name || senderId;
 
+            // Strip base64 JPEG thumbnail data from any message type.
+            // Images, videos, stickers, documents, locations all can have /9j/ thumbnails.
+            const msgType = m.type || "chat";
+            let body = m.body || "";
+            if (msgType !== "chat" && body.startsWith("/9j/")) {
+              body = "";
+            }
+
             return {
               id: m.id._serialized || m.id.toString(),
               sender: senderName,
               from: senderId,
-              body: m.body || "",
+              body,
               timestamp: m.t ? new Date(m.t * 1000).toISOString() : null,
-              type: m.type || "chat",
+              type: msgType,
               hasMedia: m.isMedia || false,
               isForwarded: m.isForwarded || false,
               hasQuotedMsg: !!m.quotedMsg,

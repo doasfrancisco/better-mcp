@@ -78,7 +78,7 @@ function callRenderer(method, args = []) {
 const MEDIA_LABELS = {
   image: "[image]", video: "[video]", audio: "[audio]",
   ptt: "[voice note]", document: "[document]", sticker: "[sticker]",
-  call_log: "[call]", vcard: "[contact]",
+  call_log: "[call]", vcard: "[contact]", location: "[location]",
 };
 
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -141,7 +141,6 @@ function formatMessages(messages, chatName, mentionMap = {}) {
     const label = MEDIA_LABELS[m.type];
     if (label && m.type !== "chat") {
       if (m.type === "document" && body) body = `[${body}]`;
-      else if (m.type === "image" || m.type === "video" || m.type === "sticker") body = label;
       else body = body ? `${label} ${body}` : label;
     }
 
