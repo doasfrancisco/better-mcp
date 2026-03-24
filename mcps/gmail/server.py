@@ -198,7 +198,6 @@ async def gmail_read_message(message_id: str, account: str, ctx: Context) -> str
                 att["content"] = client.read_pdf_with_password(
                     message_id, att["attachmentId"], pw_result.data, account,
                 )
-                del att["attachmentId"]
                 del att["password_protected"]
             except Exception:
                 att["error"] = "Wrong password or unreadable PDF"

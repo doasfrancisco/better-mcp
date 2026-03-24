@@ -383,9 +383,7 @@ class GmailClient:
         for att in attachments:
             if self._is_readable(att) and att["size"] < self._MAX_AUTO_READ:
                 self._read_attachment_content(service, message_id, att)
-                if "content" in att:
-                    del att["attachmentId"]
-                # else: password_protected or failed — keep attachmentId
+                # Keep attachmentId so download_attachment still works for the original file
             else:
                 att["downloadable"] = True
 

@@ -28,6 +28,7 @@ class GLPIClient:
                 "Missing GLPI_API_URL, GLPI_APP_TOKEN, or GLPI_USER_TOKEN in environment"
             )
         self._session_token: str | None = self._load_cached_session()
+        self._search_options_cache: dict[str, dict[str, int]] = {}  # itemtype -> {name -> field_id}
 
     # --- Session management ---
 
@@ -147,17 +148,15 @@ class GLPIClient:
         self,
         itemtype: str,
         range_str: str = "0-49",
-        sort: int = 1,
+        sort: str | None = None,
         order: str = "ASC",
         search_text: dict | None = None,
         is_deleted: bool = False,
         expand_dropdowns: bool = False,
     ) -> list | dict:
-        params = {
-            "range": range_str,
-            "sort": sort,
-            "order": order,
-        }
+        params: dict = {"range": range_str, "order": order}
+        if sort:
+            params["sort"] = sort
         if is_deleted:
             params["is_deleted"] = "true"
         if expand_dropdowns:
@@ -185,6 +184,43 @@ class GLPIClient:
         resp = self._get(f"/listSearchOptions/{itemtype}")
         resp.raise_for_status()
         return resp.json()
+
+    def _get_search_options_map(self, itemtype: str) -> dict[str, int]:
+        """Return {lowercase_field_name: field_id} for an itemtype, cached."""
+        if itemtype not in self._search_options_cache:
+            raw = self.list_search_options(itemtype)
+            mapping: dict[str, int] = {}
+            for key, opt in raw.items():
+                if not isinstance(opt, dict) or "name" not in opt:
+                    continue
+                try:
+                    field_id = int(key)
+                except ValueError:
+                    continue
+                mapping[opt["name"].strip().lower()] = field_id
+                # Also map the "field" key if present (e.g. "status" -> 12)
+                if "field" in opt:
+                    mapping[opt["field"].strip().lower()] = field_id
+            self._search_options_cache[itemtype] = mapping
+        return self._search_options_cache[itemtype]
+
+    def resolve_field(self, itemtype: str, field) -> int:
+        """Resolve a field name to its search field ID. Passes through ints unchanged."""
+        if isinstance(field, int):
+            return field
+        # Try parsing as int first (string "12" -> 12)
+        try:
+            return int(field)
+        except (ValueError, TypeError):
+            pass
+        name_map = self._get_search_options_map(itemtype)
+        field_lower = field.strip().lower()
+        if field_lower in name_map:
+            return name_map[field_lower]
+        raise ValueError(
+            f"Unknown field '{field}' for {itemtype}. "
+            f"Use glpi_list_search_options to see available fields."
+        )
 
     def search_items(
         self,
