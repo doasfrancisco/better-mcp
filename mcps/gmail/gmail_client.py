@@ -30,6 +30,12 @@ _DATE_SHORTHANDS = {
     "last_month": "newer_than:30d",
 }
 
+# Date expressions that must go through the date param, not query
+_DATE_QUERY_RE = re.compile(
+    r"\b(?:after|before|newer_than|older_than):\S+",
+    re.IGNORECASE,
+)
+
 
 def _plain_to_html(text: str) -> str:
     """Convert plain text to HTML with proper paragraph spacing."""
@@ -218,6 +224,13 @@ class GmailClient:
         """Build a Gmail search query from convenience params."""
         parts = []
         if query:
+            # Reject date expressions in query — must use the date param
+            if _DATE_QUERY_RE.search(query):
+                raise ValueError(
+                    "Date expressions (after:, before:, newer_than:, older_than:) are not "
+                    "allowed in the query parameter. Use the date parameter instead: "
+                    "'today', 'yesterday', 'last_7d', 'last_30d'."
+                )
             parts.append(query)
         if date:
             shorthand = _DATE_SHORTHANDS.get(date.lower())
@@ -271,12 +284,11 @@ class GmailClient:
         from_email: str | None = None,
         max_results: int = 50,
         account: str | None = None,
-        skip_ai: bool = True,
     ) -> dict:
         """Search emails. If account is None, searches all accounts.
 
-        When skip_ai=True, emails with ai/* labels are excluded from results
-        and their counts are returned in ai_skipped.
+        Emails with ai/* labels are always excluded from results — use
+        gmail_get_tagged("ai/finance") to see auto-sorted emails.
         """
         gmail_query = self._build_query(query, date, from_email)
         aliases = [self._resolve_alias(account)] if account else self._get_all_aliases()
@@ -285,8 +297,7 @@ class GmailClient:
 
         for alias in aliases:
             service = self._get_service(alias)
-            if skip_ai:
-                label_maps[alias] = self._get_label_map(service)
+            label_maps[alias] = self._get_label_map(service)
             resp = (
                 service.users()
                 .messages()
@@ -295,10 +306,6 @@ class GmailClient:
             )
             message_ids = [m["id"] for m in resp.get("messages", [])]
             results.extend(self._batch_get_messages(service, message_ids, alias))
-
-        if not skip_ai:
-            self._mark_as_read(results)
-            return {"results": results, "ai_skipped": {}}
 
         unsorted = []
         skipped_counts: dict[str, int] = {}

@@ -88,9 +88,13 @@ Custom tags beyond these three are also supported and auto-created on first use.
 
 Auto-sorted emails:
 - Emails tagged with "ai/*" labels (e.g. "ai/finance") have already been reviewed and sorted by the AI.
-- gmail_search_messages automatically skips ai/* emails by default and returns their counts in "ai_skipped".
+- gmail_search_messages always excludes ai/* emails and returns their counts in "ai_skipped".
 - Always show the ai_skipped summary to the user (e.g. "Also sorted: ai/programming (1), ai/finance (3)").
-- When the user asks to "show all" or explicitly wants auto-sorted emails, set skip_ai=false.
+- To see auto-sorted emails, use gmail_get_tagged("ai/finance") — NOT gmail_search_messages.
+
+Date filtering:
+- ALWAYS use the date parameter for date filtering: "today", "yesterday", "last_7d", "last_30d".
+- NEVER put date expressions (after:, before:, newer_than:, older_than:) in the query parameter — it will error.
 
 Attachments:
 - When gmail_read_message downloads attachments, immediately read them using the Read tool — do NOT ask the user first. The "hint" field in each attachment tells you the file path to read.
@@ -130,28 +134,25 @@ def _json(data) -> str:
 
 @mcp.tool()
 def gmail_search_messages(
-    query: str | None = None,
     date: str | None = None,
+    query: str | None = None,
     from_email: str | None = None,
     max_results: int = 200,
     account: str | None = None,
-    skip_ai: bool = True,
 ) -> str:
-    """Search emails using Gmail query syntax.
-
-    By default, emails with ai/* tags are excluded from results and their counts
-    are returned in "ai_skipped". Set skip_ai=false to include everything.
+    """Search emails. Auto-sorted emails (ai/*) are excluded — use gmail_get_tagged to see them.
 
     Args:
-        query: Raw Gmail query string (e.g. "subject:invoice", "is:unread").
-        date: Date shorthand — "today", "last_24h", "yesterday", "last_7d", "last_30d".
-              Auto-converted to Gmail query. Can combine with query param.
+        date: REQUIRED for date filtering. Use: "today", "yesterday", "last_7d", "last_30d".
+        query: Gmail filters like "subject:invoice", "is:unread", "from:boss". NOT for dates.
         from_email: Filter by sender email address.
-        max_results: Maximum number of results (default 50).
+        max_results: Maximum number of results (default 200).
         account: Email or alias. Omit to search all accounts.
-        skip_ai: Exclude ai/* tagged emails from results (default true). Their counts are returned in ai_skipped.
     """
-    return _json(_get_client().search_messages(query, date, from_email, max_results, account, skip_ai))
+    return _json(_get_client().search_messages(
+        query=query, date=date, from_email=from_email,
+        max_results=max_results, account=account,
+    ))
 
 
 _BINARY_EXTENSIONS = {".xlsx", ".xls", ".pptx", ".doc", ".zip", ".rar", ".7z", ".tar", ".gz"}
