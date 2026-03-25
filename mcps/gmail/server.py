@@ -351,15 +351,22 @@ def gmail_tag_messages(messages: TagOpList) -> str:
 
 
 @mcp.tool()
-def gmail_get_tagged(tag: str, max_results: int = 50, account: str | None = None) -> str:
-    """Get emails by tag. Use "important" for starred, "credentials" for login details, "contacts" for valued relationships, or any custom tag.
+def gmail_get_tagged(
+    tag: str,
+    date: str | None = None,
+    max_results: int = 50,
+    account: str | None = None,
+) -> str:
+    """Get emails by tag. Use for viewing auto-sorted emails (ai/finance, ai/promotions, etc.)
+    or built-in tags (important, credentials, contacts).
 
     Args:
-        tag: Tag name to filter by.
+        tag: Tag name — "ai/finance", "important", "credentials", "contacts", or any custom tag.
+        date: Date filter — "today", "yesterday", "last_7d", "last_30d". Omit for all time.
         max_results: Maximum number of results (default 50).
         account: Email or alias. Omit to get from all accounts.
     """
-    return _json(_get_client().get_tagged(tag, max_results, account))
+    return _json(_get_client().get_tagged(tag, date, max_results, account))
 
 
 @mcp.tool()

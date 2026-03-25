@@ -605,9 +605,17 @@ class GmailClient:
 
         return {"total": sum(r["count"] for r in results), "accounts": results}
 
-    def get_tagged(self, tag: str, max_results: int = 50, account: str | None = None) -> list[dict]:
-        """Get messages with a specific tag."""
-        query = self._resolve_tag_to_query(tag)
+    def get_tagged(
+        self,
+        tag: str,
+        date: str | None = None,
+        max_results: int = 50,
+        account: str | None = None,
+    ) -> list[dict]:
+        """Get messages with a specific tag, optionally filtered by date."""
+        base_query = self._resolve_tag_to_query(tag)
+        # Combine tag query with date filter
+        full_query = self._build_query(base_query, date, None)
         aliases = [self._resolve_alias(account)] if account else self._get_all_aliases()
         results = []
 
@@ -616,7 +624,7 @@ class GmailClient:
             resp = (
                 service.users()
                 .messages()
-                .list(userId="me", q=query, maxResults=max_results)
+                .list(userId="me", q=full_query, maxResults=max_results)
                 .execute()
             )
             message_ids = [m["id"] for m in resp.get("messages", [])]
