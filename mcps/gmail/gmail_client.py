@@ -532,7 +532,16 @@ class GmailClient:
         return {"id": sent["id"], "threadId": sent.get("threadId"), "account": alias}
 
     def trash_messages(self, messages: list[dict]) -> dict:
-        """Move multiple messages to trash, grouped by account into batchModify calls."""
+        """Move multiple messages to trash using the proper trash() endpoint.
+
+        Uses batch HTTP requests with messages().trash() per message instead of
+        batchModify(addLabelIds=["TRASH"]) — the latter only modifies labels
+        without invoking the actual trash RPC, which can silently fail to stick
+        for some messages and reports no per-message errors.
+
+        Still efficient: batch HTTP multiplexes up to 1000 trash() calls into a
+        single HTTP roundtrip (same cost as batchModify).
+        """
         by_account: dict[str, list[str]] = {}
         for msg in messages:
             alias = self._resolve_alias(msg["account"])
@@ -541,11 +550,25 @@ class GmailClient:
         results = []
         for alias, ids in by_account.items():
             service = self._get_service(alias)
-            service.users().messages().batchModify(
-                userId="me",
-                body={"ids": ids, "addLabelIds": ["TRASH"], "removeLabelIds": ["INBOX"]},
-            ).execute()
-            results.append({"account": alias, "count": len(ids), "status": "trashed"})
+            failed: list[str] = []
+
+            def _callback(request_id, response, exception):
+                if exception is not None:
+                    failed.append(request_id)
+
+            for i in range(0, len(ids), 1000):
+                batch = service.new_batch_http_request(callback=_callback)
+                for msg_id in ids[i:i + 1000]:
+                    batch.add(
+                        service.users().messages().trash(userId="me", id=msg_id),
+                        request_id=msg_id,
+                    )
+                batch.execute()
+
+            entry = {"account": alias, "count": len(ids) - len(failed), "status": "trashed"}
+            if failed:
+                entry["failed"] = failed
+            results.append(entry)
 
         return {"total": sum(r["count"] for r in results), "accounts": results}
 
