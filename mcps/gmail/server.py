@@ -133,7 +133,8 @@ def _json(data) -> str:
 
 
 @mcp.tool()
-def gmail_search_messages(
+async def gmail_search_messages(
+    ctx: Context,
     date: str | None = None,
     query: str | None = None,
     from_email: str | None = None,
@@ -149,6 +150,12 @@ def gmail_search_messages(
         max_results: Maximum number of results (default 200).
         account: Email or alias. Omit to search all accounts.
     """
+    if account:
+        response = await ctx.elicit(
+            message=f"Are you sure you want to search emails only for {account}?",
+        )
+        if response.action != "accept":
+            account = None
     return _json(_get_client().search_messages(
         query=query, date=date, from_email=from_email,
         max_results=max_results, account=account,
