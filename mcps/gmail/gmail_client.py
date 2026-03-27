@@ -213,7 +213,7 @@ class GmailClient:
 
         return fetched
 
-    def _build_query(self, query: str | None, date: str | None, from_email: str | None) -> str:
+    def _build_query(self, query: str | None, date: str | None = None, from_email: str | None = None) -> str:
         """Build a Gmail search query from convenience params."""
         parts = []
         if query:
