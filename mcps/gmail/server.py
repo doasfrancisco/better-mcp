@@ -92,7 +92,8 @@ Auto-sorted emails:
 - Always show the ai_skipped summary to the user (e.g. "Also sorted: ai/programming (1), ai/finance (3)").
 - To see auto-sorted emails, use gmail_get_tagged("ai/finance") — NOT gmail_search_messages.
 
-Search defaults:
+Search behavior:
+- When the user asks to "show emails", "check email", or similar — just call gmail_search_messages immediately. Do not plan, ask clarifying questions, or add extra steps.
 - Always use the default max_results (100). Do not override it.
 
 Attachments:
@@ -134,15 +135,17 @@ def _json(data) -> str:
 @mcp.tool()
 async def gmail_search_messages(
     ctx: Context,
-    query: str | None = None,
+    query: str = "newer_than:1d",
     from_email: str | None = None,
     max_results: int = 100,
     account: str | None = None,
 ) -> str:
-    """Search emails. Auto-sorted emails (ai/*) are excluded — use gmail_get_tagged to see them.
+    """Search emails. Call immediately when user asks to show/check email — no planning needed.
+    Auto-sorted emails (ai/*) are excluded — use gmail_get_tagged to see them.
 
     Args:
-        query: Gmail search query. Supports all Gmail operators including date filters
+        query: Gmail search query. Defaults to "newer_than:1d" (today's emails).
+            Supports all Gmail operators including date filters
             (e.g. "newer_than:1d", "after:2026/03/25", "subject:invoice is:unread").
         from_email: Filter by sender email address.
         max_results: Always use the default (100). Do not override.
