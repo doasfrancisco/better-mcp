@@ -266,6 +266,26 @@ Returns stats on what was synced.`,
     }
   );
 
+  // ── whatsapp_list_chats ───────────────────────────────────
+
+  server.tool(
+    "whatsapp_list_chats",
+    `List all chats with activity since a given timestamp.
+Reads from the local chats cache — call whatsapp_sync (no params) first to refresh.
+Returns an array of {name, id, archived} for chats whose last activity >= since.`,
+    {
+      since: z.string().describe("ISO datetime string — only return chats with activity at or after this timestamp"),
+    },
+    async ({ since }) => {
+      try {
+        const chats = cache.listChats(since);
+        return { content: [{ type: "text", text: JSON.stringify(chats) }] };
+      } catch (err) {
+        return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
+      }
+    }
+  );
+
   // ── whatsapp_find ─────────────────────────────────────────
 
   server.tool(

@@ -344,6 +344,22 @@ export function find({ query, tag, from, filter } = {}) {
   return results;
 }
 
+// ── List chats (for Signal sync) ──────────────────────────────
+
+/** List chats with activity since a given ISO timestamp.
+ *  Returns [{name, id, archived}] sorted by timestamp descending. */
+export function listChats(since) {
+  const chatCache = readCache(CHATS_CACHE);
+  if (!chatCache?.data) return [];
+
+  const cutoff = since ? new Date(since).getTime() : 0;
+
+  return chatCache.data
+    .filter((c) => c.timestamp && new Date(c.timestamp).getTime() >= cutoff)
+    .sort((a, b) => (b.timestamp || "").localeCompare(a.timestamp || ""))
+    .map((c) => ({ name: c.name, id: c.id, archived: c.archived || false }));
+}
+
 // ── Tags ──────────────────────────────────────────────────────
 
 function readTags() {
