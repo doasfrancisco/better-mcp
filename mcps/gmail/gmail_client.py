@@ -344,7 +344,6 @@ class GmailClient:
         self,
         query: str | None = None,
         from_email: str | None = None,
-        max_results: int = 100,
         account: str | None = None,
     ) -> dict:
         """Search emails. If account is None, searches all accounts.
@@ -355,11 +354,35 @@ class GmailClient:
         gmail_query = self._build_query(query, from_email=from_email)
         aliases = [self._resolve_alias(account)] if account else self._get_all_aliases()
         results = []
-        label_maps: dict[str, dict[str, str]] = {}
+        ai_skipped: dict[str, int] = {}
 
         for alias in aliases:
             service = self._get_service(alias)
-            label_maps[alias] = self._get_label_map(service)
+            label_map = self._get_label_map(service)
+
+            # Find ai/* labels, exclude from query, count each separately
+            ai_labels = [name for name in label_map.values() if name.lower().startswith("ai/")]
+            exclusions = " ".join(f"-label:{name}" for name in ai_labels)
+            account_query = f"{gmail_query} {exclusions}".strip() if exclusions else gmail_query
+
+            for ai_label in ai_labels:
+                count = 0
+                page_token = None
+                while True:
+                    count_resp = (
+                        service.users().messages()
+                        .list(userId="me", q=f"{gmail_query} label:{ai_label}",
+                              maxResults=500, pageToken=page_token)
+                        .execute()
+                    )
+                    count += len(count_resp.get("messages", []))
+                    page_token = count_resp.get("nextPageToken")
+                    if not page_token:
+                        break
+                if count > 0:
+                    ai_skipped[ai_label] = ai_skipped.get(ai_label, 0) + count
+
+            # Paginate until all matching messages are fetched
             message_ids: list[str] = []
             page_token = None
             while True:
@@ -367,34 +390,19 @@ class GmailClient:
                     service.users()
                     .messages()
                     .list(
-                        userId="me", q=gmail_query or None,
-                        maxResults=max_results, pageToken=page_token,
+                        userId="me", q=account_query or None,
+                        maxResults=500, pageToken=page_token,
                     )
                     .execute()
                 )
                 message_ids.extend(m["id"] for m in resp.get("messages", []))
                 page_token = resp.get("nextPageToken")
-                if not page_token or len(message_ids) >= max_results:
+                if not page_token:
                     break
-            results.extend(self._batch_get_messages(service, message_ids[:max_results], alias))
+            results.extend(self._batch_get_messages(service, message_ids, alias))
 
-        unsorted = []
-        skipped_counts: dict[str, int] = {}
-        for msg in results:
-            label_map = label_maps.get(msg["account"], {})
-            auto_tags = [
-                label_map[lid]
-                for lid in msg.get("labelIds", [])
-                if lid in label_map and label_map[lid].lower().startswith("ai/")
-            ]
-            if auto_tags:
-                for tag in auto_tags:
-                    skipped_counts[tag] = skipped_counts.get(tag, 0) + 1
-            else:
-                unsorted.append(msg)
-
-        self._mark_as_read(unsorted)
-        return {"results": unsorted, "ai_skipped": skipped_counts}
+        self._mark_as_read(results)
+        return {"results": results, "ai_skipped": ai_skipped}
 
     _MAX_AUTO_READ = 5 * 1024 * 1024  # 5 MB
 
@@ -610,8 +618,8 @@ class GmailClient:
         without invoking the actual trash RPC, which can silently fail to stick
         for some messages and reports no per-message errors.
 
-        Still efficient: batch HTTP multiplexes up to 1000 trash() calls into a
-        single HTTP roundtrip (same cost as batchModify).
+        Batches of _BATCH_SIZE (50) to stay under concurrency limits.
+        Failed messages are retried once.
         """
         by_account: dict[str, list[str]] = {}
         for msg in messages:
@@ -627,14 +635,26 @@ class GmailClient:
                 if exception is not None:
                     failed.append(request_id)
 
-            for i in range(0, len(ids), 1000):
+            for i in range(0, len(ids), self._BATCH_SIZE):
                 batch = service.new_batch_http_request(callback=_callback)
-                for msg_id in ids[i:i + 1000]:
+                for msg_id in ids[i:i + self._BATCH_SIZE]:
                     batch.add(
                         service.users().messages().trash(userId="me", id=msg_id),
                         request_id=msg_id,
                     )
                 batch.execute()
+
+            if failed:
+                retry_ids = failed
+                failed = []
+                for i in range(0, len(retry_ids), self._BATCH_SIZE):
+                    batch = service.new_batch_http_request(callback=_callback)
+                    for msg_id in retry_ids[i:i + self._BATCH_SIZE]:
+                        batch.add(
+                            service.users().messages().trash(userId="me", id=msg_id),
+                            request_id=msg_id,
+                        )
+                    batch.execute()
 
             entry = {"account": alias, "count": len(ids) - len(failed), "status": "trashed"}
             if failed:

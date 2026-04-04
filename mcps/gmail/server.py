@@ -106,7 +106,6 @@ Auto-sorted emails:
 
 Search behavior:
 - When the user asks to "show emails", "check email", or similar — just call gmail_search_messages immediately. Do not plan, ask clarifying questions, or add extra steps.
-- Always use the default max_results (100). Do not override it.
 
 Attachments:
 - When gmail_read_message downloads attachments, immediately read them using the Read tool — do NOT ask the user first. The "hint" field in each attachment tells you the file path to read.
@@ -211,7 +210,6 @@ async def gmail_search_messages(
     ctx: Context,
     query: str = "newer_than:1d",
     from_email: str | None = None,
-    max_results: int = 100,
     account: str | None = None,
 ) -> str:
     """Search emails. Call immediately when user asks to show/check email — no planning needed.
@@ -223,7 +221,6 @@ async def gmail_search_messages(
             Supports all Gmail operators including date filters
             (e.g. "newer_than:1d", "after:2026/03/25", "subject:invoice is:unread").
         from_email: Filter by sender email address.
-        max_results: Always use the default (100). Do not override.
         account: Email or alias. Omit to search all accounts.
     """
     if account:
@@ -234,7 +231,7 @@ async def gmail_search_messages(
             account = None
     data = _get_client().search_messages(
         query=query, from_email=from_email,
-        max_results=max_results, account=account,
+        account=account,
     )
     return _format_search_md(data)
 
