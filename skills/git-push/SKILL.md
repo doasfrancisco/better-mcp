@@ -91,6 +91,21 @@ If step 5 already pushed (cases b and c), skip this step. Otherwise:
 git push
 ```
 
+**Read the push output.** If GitHub has renamed or transferred the repo, it prints something like:
+
+```
+remote: This repository moved. Please use the new location:
+remote:   https://github.com/<org>/<new-name>.git
+```
+
+The push still succeeds via redirect, but the local `origin` still points at the old name. When you see this notice, update the URL on the spot:
+
+```bash
+git remote set-url origin https://github.com/<org>/<new-name>.git
+```
+
+Use the exact URL printed after "new location:". Tell the user you updated the origin URL and show the new value.
+
 ## Rules
 
 - NEVER skip any step.
