@@ -29,6 +29,9 @@ cd mcps/whatsapp && npm start
 ### Rebuilding after code changes
 
 ```bash
+# Back up caches first
+mkdir -p backup-$(date +%Y%m%d) && cp chats.json contacts.json tags.json backup-$(date +%Y%m%d)/ && cp -r messages/ backup-$(date +%Y%m%d)/messages/
+
 npm run dist
 ```
 
@@ -49,10 +52,30 @@ Claude Code connects to `http://localhost:39571/mcp`:
 
 ## Tools
 
+Cache-first. Every read tool auto-refreshes its slice of the local cache
+from the running WhatsApp app before returning, so callers never need an
+explicit sync step.
+
 | Tool | Description |
 |------|-------------|
-| `whatsapp_sync` | Sync contacts/chats/messages from WhatsApp into local cache |
-| `whatsapp_find` | Search contacts and chats by name, tag, date, or filter |
-| `whatsapp_get_messages` | Read cached messages (no API calls) |
-| `whatsapp_tag_contacts` | Add/remove tags on contacts |
-| `whatsapp_send` | Send a text message (safe — uses official WhatsApp Web) |
+| `whatsapp_list_chats` | List chats/groups by `query` (name/phone substring) and/or `since` (ISO timestamp). Auto-refreshes contacts+chats cache. |
+| `whatsapp_list_contacts` | List saved contacts by `query` and/or `tag`. Enriches each contact with chat activity when available. Auto-refreshes contacts+chats cache. |
+| `whatsapp_get_messages` | Read messages from a chat by `chat_id`. Incremental sync: skips entirely when `chat.t` hasn't moved; fetches back-history only on a cold chat. Default window: last 48h. |
+| `whatsapp_tag_contacts` | Add/remove tags on contacts (name, phone, or id). Default tags: family, work, partner, followup. |
+
+### How sync works
+
+- **Contacts + chats refresh** (`list_chats` / `list_contacts`): iterates the
+  WhatsApp Web in-memory Store. Zero network calls to WhatsApp's servers.
+- **Message refresh** (`get_messages`): reads `chat.t` from the Store (free)
+  and compares against the newest cached message for that chat. If `chat.t`
+  hasn't advanced, nothing is fetched. If it has, only messages newer than
+  the cached baseline are pulled. The only branch that triggers real
+  WhatsApp server requests is a cold chat (no message cache yet), where
+  `ConversationMsgs.loadEarlierMsgs` is looped to pull back-history — capped
+  at ~5000 messages per call.
+
+## Inspiration
+
+- [forgexfoundation/whatsapp-desktop-client](https://github.com/forgexfoundation/whatsapp-desktop-client) — Electron shell structure (window state, single-instance lock, protocol handler).
+- [pedroslopez/whatsapp-web.js](https://github.com/pedroslopez/whatsapp-web.js) — Reference for WhatsApp Web webpack module names and Store API patterns. This project does not use whatsapp-web.js as a dependency.

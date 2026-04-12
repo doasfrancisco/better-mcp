@@ -1,6 +1,6 @@
 {
   "name": "whatsapp-electron",
-  "version": "1.0.0",
+  "version": "3.0.0",
   "description": "WhatsApp Desktop with built-in MCP server",
   "main": "main.js",
   "type": "module",

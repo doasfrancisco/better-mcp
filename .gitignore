@@ -28,6 +28,7 @@ mcps/whatsapp/chats.json
 mcps/whatsapp/tags.json
 mcps/whatsapp/messages/
 mcps/whatsapp/dist/
+mcps/whatsapp/backup-*/
 
 # GLPI
 mcps/glpi/.session.json

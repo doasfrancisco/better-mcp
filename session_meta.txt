@@ -1,3 +1,0 @@
-# Session: 3a72484a-749e-43c3-8414-94bff551f20a
-# Source: C:\Users\franc\.claude\projects\C--Francisco-github-repositories-mcp-servers\3a72484a-749e-43c3-8414-94bff551f20a.jsonl
-# Messages: 172

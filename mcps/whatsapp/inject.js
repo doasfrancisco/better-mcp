@@ -40,6 +40,8 @@
       UserPrefs: "WAWebUserPrefsMeUser",
       SendSeen: "WAWebUpdateUnreadChatAction",
       SocketModel: "WAWebSocketModel",
+      FindChat: "WAWebFindChatAction",
+      WidFactory: "WAWebWidFactory",
     };
 
     for (const [key, moduleName] of Object.entries(extras)) {
@@ -93,6 +95,16 @@
 
   function createAPI(modules) {
     const api = { _ready: true, _modules: modules };
+
+    async function resolveChat(chatId) {
+      const store = modules.Chat;
+      if (!store) throw new Error("Chat store not available");
+
+      const wid = modules.WidFactory?.createWid ? modules.WidFactory.createWid(chatId) : chatId;
+      return store.get(wid) || store.get(chatId)
+        || (await modules.FindChat?.findOrCreateLatestChat?.(wid))?.chat
+        || null;
+    }
 
     api.getContacts = () => {
       const store = modules.Contact;
@@ -195,41 +207,16 @@
         .filter(Boolean);
     };
 
-    api.getMessages = async (chatId, count = 50) => {
-      const store = modules.Chat;
-      if (!store) throw new Error("Chat store not available");
-
-      const chat = store.get(chatId);
-      if (!chat) throw new Error(`Chat ${chatId} not found`);
-
-      // Get already-loaded messages
-      const msgStore = chat.msgs;
-      if (!msgStore) return [];
-
-      let models = msgStore.getModelsArray ? msgStore.getModelsArray() : [];
-
-      // Load more from server if we don't have enough and ConversationMsgs is available
-      if (models.length < count && modules.ConversationMsgs?.loadEarlierMsgs) {
-        const maxLoops = 10;
-        for (let i = 0; i < maxLoops && models.length < count; i++) {
-          const loaded = await modules.ConversationMsgs.loadEarlierMsgs(chat);
-          if (!loaded || !loaded.length) break;
-          models = msgStore.getModelsArray();
-        }
-      }
-
-      return models
-        .slice(-count)
+    function serializeMessages(models, limit = null) {
+      const selected = limit == null ? models : models.slice(-limit);
+      return selected
         .map((m) => {
           try {
-            // Serialize ID objects to strings (raw Store models use objects, cache needs strings)
             const authorId = m.author?._serialized || m.author;
             const fromId = m.from?._serialized || m.from;
             const senderId = authorId || fromId;
             const senderName = m.senderObj?.pushname || m.senderObj?.name || senderId;
 
-            // Strip base64 JPEG thumbnail data from any message type.
-            // Images, videos, stickers, documents, locations all can have /9j/ thumbnails.
             const msgType = m.type || "chat";
             let body = m.body || "";
             if (msgType !== "chat" && body.startsWith("/9j/")) {
@@ -250,6 +237,121 @@
           } catch { return null; }
         })
         .filter(Boolean);
+    }
+
+    api.getMessages = async (chatId, count = 50, options = {}) => {
+      let chat = await resolveChat(chatId);
+      if (!chat) throw new Error(`Chat ${chatId} not found`);
+
+      let msgStore = chat.msgs;
+      if (!msgStore) return [];
+
+      let models = msgStore.getModelsArray ? msgStore.getModelsArray() : [];
+      const {
+        allowLoadEarlier = true,
+        stopAtTimestamp = null,
+      } = options || {};
+
+      // Each loadEarlierMsgs round is a real WhatsApp server request.
+      // If the first call fails (chat not fully loaded), we activate it
+      // via findOrCreateLatestChat and retry — one extra call, only once.
+      if (allowLoadEarlier && modules.ConversationMsgs?.loadEarlierMsgs) {
+        let needsActivation = false;
+        while (models.length < count) {
+          if (stopAtTimestamp && models.length > 0) {
+            const oldestTs = models[0]?.t ? new Date(models[0].t * 1000).toISOString() : null;
+            if (oldestTs && oldestTs <= stopAtTimestamp) break;
+          }
+          try {
+            const loaded = await modules.ConversationMsgs.loadEarlierMsgs(chat);
+            if (!loaded || !loaded.length) break;
+            models = msgStore.getModelsArray();
+          } catch {
+            needsActivation = true;
+            break;
+          }
+        }
+
+        if (needsActivation && modules.FindChat?.findOrCreateLatestChat && modules.WidFactory?.createWid) {
+          try {
+            const resolvedChat = await resolveChat(chatId);
+            if (resolvedChat) {
+              chat = resolvedChat;
+              msgStore = chat.msgs;
+              models = msgStore?.getModelsArray?.() || models;
+              while (models.length < count) {
+                if (stopAtTimestamp && models.length > 0) {
+                  const oldestTs = models[0]?.t ? new Date(models[0].t * 1000).toISOString() : null;
+                  if (oldestTs && oldestTs <= stopAtTimestamp) break;
+                }
+                const loaded = await modules.ConversationMsgs.loadEarlierMsgs(chat);
+                if (!loaded || !loaded.length) break;
+                models = msgStore.getModelsArray();
+              }
+            }
+          } catch {}
+        }
+      }
+
+      return serializeMessages(models, count);
+    };
+
+    api.getMessagesUntil = async (chatId, stopAtTimestamp = null) => {
+      let chat = await resolveChat(chatId);
+      if (!chat) throw new Error(`Chat ${chatId} not found`);
+
+      let msgStore = chat.msgs;
+      if (!msgStore) return [];
+
+      let models = msgStore.getModelsArray ? msgStore.getModelsArray() : [];
+      if (stopAtTimestamp && models.length > 0) {
+        const oldestTs = models[0]?.t ? new Date(models[0].t * 1000).toISOString() : null;
+        if (oldestTs && oldestTs <= stopAtTimestamp) {
+          return serializeMessages(models);
+        }
+      }
+
+      if (!modules.ConversationMsgs?.loadEarlierMsgs) {
+        return serializeMessages(models);
+      }
+
+      let needsActivation = false;
+      while (true) {
+        if (stopAtTimestamp && models.length > 0) {
+          const oldestTs = models[0]?.t ? new Date(models[0].t * 1000).toISOString() : null;
+          if (oldestTs && oldestTs <= stopAtTimestamp) break;
+        }
+        try {
+          const loaded = await modules.ConversationMsgs.loadEarlierMsgs(chat);
+          if (!loaded || !loaded.length) break;
+          models = msgStore.getModelsArray();
+        } catch {
+          needsActivation = true;
+          break;
+        }
+      }
+
+      if (needsActivation && modules.FindChat?.findOrCreateLatestChat && modules.WidFactory?.createWid) {
+        try {
+          const resolvedChat = await resolveChat(chatId);
+          if (resolvedChat) {
+            chat = resolvedChat;
+            msgStore = chat.msgs;
+            models = msgStore?.getModelsArray?.() || models;
+            while (true) {
+              if (stopAtTimestamp && models.length > 0) {
+                const oldestTs = models[0]?.t ? new Date(models[0].t * 1000).toISOString() : null;
+                if (oldestTs && oldestTs <= stopAtTimestamp) break;
+              }
+              const loaded = await modules.ConversationMsgs.loadEarlierMsgs(chat);
+              if (!loaded || !loaded.length) break;
+              models = msgStore.getModelsArray();
+            }
+          }
+        } catch {}
+      }
+
+      return serializeMessages(models);
     };
 
     api.sendMessage = async (chatId, text) => {

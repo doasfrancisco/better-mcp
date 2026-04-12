@@ -1,9 +1,4 @@
-/**
- * cache.js — JSON cache operations for contacts, chats, messages, and tags.
- *
- * Extracted from the original whatsapp_client.js. Same file structure,
- * same merge strategies, same data format — so existing cache files work.
- */
+// cache.js — JSON cache operations for contacts, chats, messages, and tags.
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
@@ -34,14 +29,13 @@ export function writeCache(path, data) {
   } catch {}
 }
 
-// ── Mention map ───────────────────────────────────────────────
+// ── Mention map (number → contact name) ───────────────────────
 
-/** Build a number → contact name map for resolving @mentions.
- *  Maps both phone numbers (@c.us) and internal IDs (@lid) so mentions resolve regardless of format. */
+/** Maps both @c.us phone numbers and @lid internal IDs so mentions resolve
+ *  regardless of which form WhatsApp embeds in the message body. */
 export function getMentionMap() {
   const map = {};
 
-  // From contacts cache (@c.us entries with phone numbers)
   const contacts = readCache(CONTACTS_CACHE) || [];
   for (const c of contacts) {
     const name = c.name || c.pushname || null;
@@ -51,7 +45,6 @@ export function getMentionMap() {
     if (c.number && !map[c.number]) map[c.number] = name;
   }
 
-  // From chats cache (@lid entries that contacts cache doesn't have)
   const chatCache = readCache(CHATS_CACHE);
   if (chatCache?.data) {
     for (const c of chatCache.data) {
@@ -64,23 +57,7 @@ export function getMentionMap() {
   return map;
 }
 
-// ── Chat resolution (by name, from chats cache) ──────────────
-// The chats cache has the actual IDs the Chat store uses (@lid or @g.us).
-// This mirrors the old whatsapp-web.js findChat() which searched chats by name first.
-
-/** Resolve a chat name to { id, name } using the chats cache. Exact match only. */
-export function resolveChatByName(query) {
-  const chats = readCache(CHATS_CACHE);
-  if (!chats?.data) return null;
-  const q = query.toLowerCase();
-
-  const exact = chats.data.find((c) => c.name?.toLowerCase() === q || c.id === query);
-  if (exact) return { id: exact.id, name: exact.name };
-
-  return null;
-}
-
-// ── Contact resolution ────────────────────────────────────────
+// ── Chat / contact resolution ────────────────────────────────
 
 function wordMatch(name, queryWords) {
   if (!name) return false;
@@ -88,7 +65,6 @@ function wordMatch(name, queryWords) {
   return queryWords.every((qw) => nameWords.some((nw) => nw === qw));
 }
 
-/** Resolve a contact/group query to { id, name } using caches. */
 export function resolveContact(query) {
   const q = query.toLowerCase();
   const queryWords = q.split(/\s+/);
@@ -126,7 +102,7 @@ export function resolveContact(query) {
   return null;
 }
 
-/** Find candidate contacts when exact resolution fails. */
+/** Partial matches to surface when `resolveContact` finds nothing exact. */
 export function findCandidates(query) {
   const words = query.toLowerCase().split(/\s+/);
   const candidates = [];
@@ -165,11 +141,10 @@ export function findCandidates(query) {
   return candidates;
 }
 
-// ── Contacts sync ─────────────────────────────────────────────
+// ── Contacts merge ────────────────────────────────────────────
 
 const CONTACT_TRACKED_FIELDS = ["name", "pushname", "number"];
 
-/** Merge fresh contacts into cache, tracking changes. */
 export function mergeContacts(freshContacts) {
   const cached = readCache(CONTACTS_CACHE);
   if (!cached) {
@@ -203,11 +178,10 @@ export function mergeContacts(freshContacts) {
   return { synced: merged.length, added, changed };
 }
 
-// ── Chats sync ────────────────────────────────────────────────
+// ── Chats merge ───────────────────────────────────────────────
 
 const CHAT_TRACKED_FIELDS = ["name"];
 
-/** Merge fresh chats into cache, tracking changes. */
 export function mergeChats(freshChats) {
   const cached = readCache(CHATS_CACHE);
   if (!cached) {
@@ -248,9 +222,9 @@ export function mergeChats(freshChats) {
   return { synced: merged.length, added, changed, updated: updatedChats.length, updatedChats };
 }
 
-// ── Messages sync ─────────────────────────────────────────────
+// ── Messages merge ────────────────────────────────────────────
 
-/** Merge fetched messages into per-chat cache file. */
+/** Deduplicates by message id so growing-batch syncs can safely overlap. */
 export function mergeMessages(chatId, freshMessages) {
   if (!existsSync(MESSAGES_DIR)) mkdirSync(MESSAGES_DIR);
   const filePath = join(MESSAGES_DIR, `${chatId}.json`);
@@ -264,59 +238,85 @@ export function mergeMessages(chatId, freshMessages) {
   return { total: merged.length, added: merged.length - existing.length };
 }
 
-// ── Read messages (cache-only) ────────────────────────────────
+// ── Incremental-sync lookups ──────────────────────────────────
 
-/** Get cached messages for a chat. */
-export function getMessages(chatQuery, since) {
-  const resolved = resolveContact(chatQuery);
-  if (!resolved) return { messages: [], error: `No chat found matching "${chatQuery}". Sync first.` };
-
-  let filePath = join(MESSAGES_DIR, `${resolved.id}.json`);
-  let cached = readCache(filePath);
-
-  // Fallback: check chats cache for alternative id (@c.us vs @lid)
-  if (!cached) {
-    const chatCache = readCache(CHATS_CACHE);
-    if (chatCache?.data) {
-      const rName = resolved.name?.toLowerCase();
-      const alt = chatCache.data.find((c) => c.id !== resolved.id && c.name?.toLowerCase() === rName);
-      if (alt) {
-        filePath = join(MESSAGES_DIR, `${alt.id}.json`);
-        cached = readCache(filePath);
-      }
-    }
-  }
-
-  if (!cached) return { messages: [], chat: resolved.name, error: 'No messages cached. Use whatsapp_sync with what="messages" first.' };
-
-  const cutoff = since ? new Date(since) : new Date(Date.now() - 24 * 60 * 60 * 1000);
-  const filtered = cached.filter((m) => new Date(m.timestamp) >= cutoff);
-
-  return { chat: resolved.name, id: resolved.id, messages: filtered };
+export function getNewestCachedMessageTimestamp(chatId) {
+  const filePath = join(MESSAGES_DIR, `${chatId}.json`);
+  const cached = readCache(filePath);
+  if (!cached || cached.length === 0) return null;
+  return cached[cached.length - 1].timestamp;
 }
 
-// ── Find (cache-only search) ──────────────────────────────────
+export function getCachedChatTimestamp(chatId) {
+  const chatCache = readCache(CHATS_CACHE);
+  if (!chatCache?.data) return null;
+  const chat = chatCache.data.find((c) => c.id === chatId);
+  return chat?.timestamp || null;
+}
 
-/** Unified search across contacts and chats caches. */
-export function find({ query, tag, from, filter } = {}) {
-  if (!query && !tag && !from && !filter) {
-    const now = new Date();
-    from = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+/** Falls back to the raw id when the chat isn't in either cache. */
+export function getCachedChatName(chatId) {
+  const chatCache = readCache(CHATS_CACHE);
+  const chat = chatCache?.data?.find((c) => c.id === chatId);
+  if (chat?.name) return chat.name;
+  const contacts = readCache(CONTACTS_CACHE) || [];
+  const contact = contacts.find((c) => c.id === chatId);
+  return contact?.name || contact?.pushname || chatId;
+}
+
+// ── Filtered reads ────────────────────────────────────────────
+
+function textMatch(entry, query) {
+  if (!query) return true;
+  const q = query.toLowerCase();
+  if (entry.id === query) return true;
+  if (entry.id?.toLowerCase().includes(q)) return true;
+  if (entry.name?.toLowerCase().includes(q)) return true;
+  if (entry.pushname?.toLowerCase().includes(q)) return true;
+  if (entry.number?.includes(query)) return true;
+
+  const qWords = q.split(/\s+/);
+  const nameWords = (entry.name || "").toLowerCase().split(/\s+/);
+  if (qWords.every((qw) => nameWords.some((nw) => nw === qw))) return true;
+  const pushnameWords = (entry.pushname || "").toLowerCase().split(/\s+/);
+  if (qWords.every((qw) => pushnameWords.some((nw) => nw === qw))) return true;
+  return false;
+}
+
+export function listChatsFiltered({ query, since } = {}) {
+  const chatCache = readCache(CHATS_CACHE);
+  let results = chatCache?.data || [];
+
+  if (query) results = results.filter((c) => textMatch(c, query));
+
+  if (since) {
+    const sinceISO = new Date(since).toISOString();
+    results = results.filter((c) => c.timestamp && c.timestamp >= sinceISO);
   }
 
-  const tagData = readTags();
+  results.sort((a, b) => (b.timestamp || "").localeCompare(a.timestamp || ""));
+  return results;
+}
+
+/** Merges contacts + chats so tagged groups and @lid entries still surface. */
+export function listContactsFiltered({ query, tag } = {}) {
   const contacts = readCache(CONTACTS_CACHE) || [];
   const chatCache = readCache(CHATS_CACHE);
   const chats = chatCache?.data || [];
+  const tagData = readTags();
 
   const index = {};
-  for (const c of contacts) index[c.id] = { ...c, tags: tagData.contacts[c.id] || [] };
+  for (const c of contacts) {
+    index[c.id] = { ...c, tags: tagData.contacts[c.id] || [] };
+  }
   for (const c of chats) {
     if (index[c.id]) {
       Object.assign(index[c.id], {
-        timestamp: c.timestamp, unreadCount: c.unreadCount,
-        archived: c.archived, pinned: c.pinned,
-        lastMessage: c.lastMessage, participants: c.participants,
+        timestamp: c.timestamp,
+        unreadCount: c.unreadCount,
+        archived: c.archived,
+        pinned: c.pinned,
+        lastMessage: c.lastMessage,
       });
     } else {
       index[c.id] = { ...c, tags: tagData.contacts[c.id] || [] };
@@ -326,38 +326,17 @@ export function find({ query, tag, from, filter } = {}) {
   let results = Object.values(index);
 
   if (tag) results = results.filter((r) => r.tags.includes(tag));
-  if (query) {
-    const q = query.toLowerCase();
-    results = results.filter(
-      (r) => r.name?.toLowerCase().includes(q) || r.pushname?.toLowerCase().includes(q) || r.number?.includes(q)
-    );
-  }
-  if (from) {
-    const fromISO = new Date(from + "T00:00:00Z").toISOString();
-    results = results.filter((r) => r.timestamp && r.timestamp >= fromISO);
-  }
-  if (filter === "pinned") results = results.filter((r) => r.pinned);
-  else if (filter === "unread") results = results.filter((r) => r.unreadCount > 0);
-  else if (filter === "groups") results = results.filter((r) => r.isGroup);
+  if (query) results = results.filter((r) => textMatch(r, query));
 
   results.sort((a, b) => (b.timestamp || "").localeCompare(a.timestamp || ""));
   return results;
 }
 
-// ── List chats (for Signal sync) ──────────────────────────────
-
-/** List chats with activity since a given ISO timestamp.
- *  Returns [{name, id, archived}] sorted by timestamp descending. */
-export function listChats(since) {
-  const chatCache = readCache(CHATS_CACHE);
-  if (!chatCache?.data) return [];
-
-  const cutoff = since ? new Date(since).getTime() : 0;
-
-  return chatCache.data
-    .filter((c) => c.timestamp && new Date(c.timestamp).getTime() >= cutoff)
-    .sort((a, b) => (b.timestamp || "").localeCompare(a.timestamp || ""))
-    .map((c) => ({ name: c.name, id: c.id, archived: c.archived || false }));
+export function readCachedMessages(chatId, since) {
+  const filePath = join(MESSAGES_DIR, `${chatId}.json`);
+  const cached = readCache(filePath) || [];
+  const cutoff = since ? new Date(since) : new Date(Date.now() - 48 * 60 * 60 * 1000);
+  return cached.filter((m) => new Date(m.timestamp) >= cutoff);
 }
 
 // ── Tags ──────────────────────────────────────────────────────
@@ -378,7 +357,7 @@ export function tagContact(contact, tags) {
       const candidates = findCandidates(contact);
       if (candidates.length > 0) return { candidates: candidates.map((c) => c.name), query: contact };
     }
-    return { error: `No contact found matching "${contact}". Sync contacts first.` };
+    return { error: `No contact found matching "${contact}".` };
   }
 
   const data = readTags();
@@ -394,7 +373,7 @@ export function tagContact(contact, tags) {
 
 export function untagContact(contact, tags) {
   const resolved = resolveContact(contact);
-  if (!resolved) return { error: `No contact found matching "${contact}". Sync contacts first.` };
+  if (!resolved) return { error: `No contact found matching "${contact}".` };
 
   const data = readTags();
   const existing = data.contacts[resolved.id] || [];

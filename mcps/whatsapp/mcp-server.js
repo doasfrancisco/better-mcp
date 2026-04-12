@@ -1,12 +1,14 @@
 /**
  * mcp-server.js — MCP HTTP server running inside Electron's main process.
  *
- * Same Express + StreamableHTTPServerTransport pattern as the old server.js.
- * Same port (39571), same tool schemas — Claude Code config doesn't change.
+ * Every read tool auto-refreshes its cache slice from the renderer before
+ * returning. Contacts+chats refresh is free (Store iteration). Message
+ * refresh is incremental (skipped when chat.t hasn't moved). The one branch
+ * that triggers real WhatsApp server requests is get_messages on a cold
+ * chat, where inject.js loops loadEarlierMsgs.
  *
- * Data flow for sync tools:
- *   MCP tool handler → callRenderer(method, args) → IPC → inject.js → Store API
- *   inject.js → IPC → main process → cache merge → MCP response
+ * IPC flow:
+ *   tool handler → callRenderer → IPC → inject.js → Store API → IPC → cache merge
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -22,24 +24,18 @@ import * as cache from "./cache.js";
 const PORT = 39571;
 
 // ── Renderer bridge ───────────────────────────────────────────
-// Calls inject.js functions in the WhatsApp Web page via IPC.
-// The main process sends a request, preload forwards it as a window event,
-// inject.js handles it and posts the result back.
 
 const pendingRequests = new Map();
 let nextRequestId = 1;
 
-// Reference to main window — set by main.js after window creation
 let _getWindow = null;
 let _isReady = null;
 
-/** Called by main.js to register the window accessor. */
 export function setBridge(getWindowFn, isReadyFn) {
   _getWindow = getWindowFn;
   _isReady = isReadyFn;
 }
 
-// Handle responses from the renderer
 ipcMain.handle("wa:response", (_event, requestId, result, error) => {
   const pending = pendingRequests.get(requestId);
   if (!pending) return;
@@ -48,10 +44,6 @@ ipcMain.handle("wa:response", (_event, requestId, result, error) => {
   else pending.resolve(result);
 });
 
-/**
- * Call a method on window.__waAPI in the renderer process.
- * Returns a promise that resolves with the result.
- */
 function callRenderer(method, args = []) {
   const win = _getWindow?.();
   if (!win) return Promise.reject(new Error("WhatsApp window not open"));
@@ -73,6 +65,47 @@ function callRenderer(method, args = []) {
   });
 }
 
+// ── Auto-sync helpers ────────────────────────────────────────
+
+async function autoSyncContactsChats() {
+  const [contacts, chats] = await Promise.all([
+    callRenderer("getContacts"),
+    callRenderer("getChats"),
+  ]);
+  cache.mergeContacts(contacts);
+  cache.mergeChats(chats);
+}
+
+function resolveSenderNames(messages) {
+  const mentionMap = cache.getMentionMap();
+  for (const m of messages) {
+    const num = (m.from || "").split("@")[0];
+    if (num && mentionMap[num]) m.sender = mentionMap[num];
+  }
+}
+
+async function fetchMessagesUntil(chatId, stopAt) {
+  const all = await callRenderer("getMessagesUntil", [chatId, stopAt]);
+  return stopAt ? all.filter((m) => m.timestamp > stopAt) : all;
+}
+
+async function autoSyncMessages(chatId, since) {
+  const newestCached = cache.getNewestCachedMessageTimestamp(chatId);
+
+  let fresh;
+  if (!newestCached) {
+    fresh = await fetchMessagesUntil(chatId, since);
+  } else {
+    const chatTimestamp = cache.getCachedChatTimestamp(chatId);
+    if (chatTimestamp && chatTimestamp <= newestCached) return;
+    fresh = await fetchMessagesUntil(chatId, newestCached);
+  }
+
+  if (!fresh || fresh.length === 0) return;
+  resolveSenderNames(fresh);
+  cache.mergeMessages(chatId, fresh);
+}
+
 // ── Message formatter ─────────────────────────────────────────
 
 const MEDIA_LABELS = {
@@ -84,7 +117,6 @@ const MEDIA_LABELS = {
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-/** Convert a UTC ISO string to local timezone display string. */
 function toLocalTime(utcISO) {
   if (!utcISO) return null;
   const dt = new Date(utcISO);
@@ -97,7 +129,6 @@ function toLocalTime(utcISO) {
   return `${month} ${day}, ${h12}:${m} ${ampm}`;
 }
 
-/** Convert timestamps in find results to local timezone for display. */
 function localizeResults(results) {
   return results.map((r) => {
     const out = { ...r };
@@ -157,108 +188,56 @@ function formatMessages(messages, chatName, mentionMap = {}) {
 
 // ── MCP server factory ───────────────────────────────────────
 
-const RELATIONSHIP_TAGS = {
-  girlfriend: "partner", boyfriend: "partner", wife: "partner", husband: "partner",
-  partner: "partner", spouse: "partner", fiance: "partner", fiancee: "partner",
-  coworker: "work", colleague: "work", boss: "work",
-  brother: "family", sister: "family", mom: "family", dad: "family",
-  mother: "family", father: "family", cousin: "family", uncle: "family", aunt: "family",
-};
-
 function createServer() {
   const server = new McpServer({
     name: "whatsapp",
-    version: "2.0.0",
-    instructions: `When asked to show messages:
-1. If you don't have an exact contact name, use whatsapp_find to resolve it first.
-2. Try whatsapp_get_messages — it reads from local cache with zero API calls.
-3. Only if the cache is empty, ask the user before syncing.
+    version: "3.0.0",
+    instructions: `To read WhatsApp messages:
+1. Call whatsapp_list_chats (or whatsapp_list_contacts) to find the chat and grab its id.
+   - whatsapp_list_chats requires at least one of: query (name/phone substring) or since (ISO timestamp).
+   - whatsapp_list_contacts requires at least one of: query or tag.
+2. Pass that id into whatsapp_get_messages to read the conversation.
+
+Every read tool auto-refreshes its slice of the cache from the WhatsApp app —
+you never need to call a separate sync step.
 
 CRITICAL — whatsapp_get_messages returns pre-formatted conversation output.
 You MUST paste the ENTIRE text content into your response as a verbatim code block.
 Do NOT summarize, paraphrase, abbreviate, or skip any messages. Show EVERY line.`,
   });
 
-  // ── whatsapp_sync ─────────────────────────────────────────
+  // ── whatsapp_list_chats ──────────────────────────────────
 
   server.tool(
-    "whatsapp_sync",
-    `Sync WhatsApp data from the app into the local cache.
-NEVER call this to read messages — use whatsapp_get_messages first.
-Only sync messages if whatsapp_get_messages returned empty and the user agreed to sync.
-This is the ONLY tool that makes API calls — all other tools read from cache.
-With no params: syncs contacts and chats in parallel.
-With what="messages" + chats array: fetches and caches messages for specific chats.
-Returns stats on what was synced.`,
+    "whatsapp_list_chats",
+    `List WhatsApp chats and groups. At least one of \`query\` or \`since\` is required.
+  • query  — substring match on chat name, id, or phone number
+  • since  — ISO timestamp; returns chats with activity at or after this time
+
+Auto-refreshes the contacts and chats caches from the WhatsApp app before
+querying (free — iterates the in-memory Store, no server calls).
+
+Returns each match with id, name, timestamp, unreadCount, archive/pin state,
+last message, and participants (groups). Pass the id into
+whatsapp_get_messages to read the conversation.`,
     {
-      what: z.enum(["messages"]).optional().describe('Optional: "messages" to sync messages for specific chats. Omit to sync contacts+chats.'),
-      chats: z.array(z.string()).optional().describe('Chat names to sync messages for (required when what="messages")'),
-      since: z.string().optional().describe("ISO date (YYYY-MM-DD) — sync messages from this date. Default: 2 days ago."),
+      query: z.string().optional().describe("Name, id, or phone substring to search for"),
+      since: z.string().optional().describe("ISO datetime — chats with activity at or after this timestamp"),
     },
-    async ({ what, chats: chatNames, since }) => {
+    async ({ query, since }) => {
+      if (!query && !since) {
+        return { content: [{ type: "text", text: "Pass at least one of `query` or `since`." }], isError: true };
+      }
+      let warning = null;
       try {
-        if (what === "messages") {
-          if (!chatNames || chatNames.length === 0) {
-            return { content: [{ type: "text", text: "Provide a chats array with chat names to sync messages for." }] };
-          }
-
-          const cutoff = since
-            ? new Date(since + "T00:00:00Z")
-            : new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
-          const cutoffISO = cutoff.toISOString();
-
-          const results = [];
-          for (const name of chatNames) {
-            // Resolve via chats cache first (has @lid IDs that Chat store recognizes),
-            // then fall back to contacts cache (has @c.us IDs).
-            // This mirrors the old whatsapp-web.js findChat() approach.
-            const resolved = cache.resolveChatByName(name) || cache.resolveContact(name);
-            if (!resolved) {
-              results.push({ chat: name, error: "not found" });
-              continue;
-            }
-
-            // Fetch in growing batches until we've reached past the cutoff date
-            // (same approach as old whatsapp-web.js syncMessages)
-            let messages = [];
-            let batch = 50;
-            const MAX_BATCH = 1000;
-            while (batch <= MAX_BATCH) {
-              messages = await callRenderer("getMessages", [resolved.id, batch]);
-              if (messages.length === 0 || messages.length < batch) break;
-              // messages[0] is the oldest (chronological order)
-              if (messages[0].timestamp <= cutoffISO) break;
-              batch *= 2;
-            }
-
-            // Resolve sender names to address book names (same as legacy).
-            // inject.js returns pushnames from senderObj; mentionMap has address book names.
-            const mentionMap = cache.getMentionMap();
-            for (const m of messages) {
-              const num = (m.from || "").split("@")[0];
-              if (num && mentionMap[num]) m.sender = mentionMap[num];
-            }
-
-            const filtered = messages.filter((m) => m.timestamp >= cutoffISO);
-            const mergeResult = cache.mergeMessages(resolved.id, filtered);
-            results.push({ chat: resolved.name, id: resolved.id, synced: filtered.length, ...mergeResult });
-          }
-          return { content: [{ type: "text", text: JSON.stringify(results, null, 2) }] };
-        }
-
-        // Default: sync contacts + chats from WhatsApp Store
-        const [contacts, chats] = await Promise.all([
-          callRenderer("getContacts"),
-          callRenderer("getChats"),
-        ]);
-
-        const contactsResult = cache.mergeContacts(contacts);
-        const chatsResult = cache.mergeChats(chats);
-
-        let text = `Contacts: ${contactsResult.synced} total, ${contactsResult.added} new, ${contactsResult.changed} changed.\nChats: ${chatsResult.synced} total, ${chatsResult.added} new, ${chatsResult.changed} changed, ${chatsResult.updated} updated.`;
-        if (chatsResult.updatedChats.length > 0) {
-          text += `\n\nUpdated chats:\n${JSON.stringify(chatsResult.updatedChats, null, 2)}`;
-        }
+        await autoSyncContactsChats();
+      } catch (err) {
+        warning = `Auto-sync failed (${err.message}) — serving cached data.`;
+      }
+      try {
+        const results = cache.listChatsFiltered({ query, since });
+        const body = JSON.stringify(localizeResults(results), null, 2);
+        const text = warning ? `${warning}\n\n${body}` : body;
         return { content: [{ type: "text", text }] };
       } catch (err) {
         return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
@@ -266,95 +245,92 @@ Returns stats on what was synced.`,
     }
   );
 
-  // ── whatsapp_list_chats ───────────────────────────────────
+  // ── whatsapp_list_contacts ───────────────────────────────
 
   server.tool(
-    "whatsapp_list_chats",
-    `List all chats with activity since a given timestamp.
-Reads from the local chats cache — call whatsapp_sync (no params) first to refresh.
-Returns an array of {name, id, archived} for chats whose last activity >= since.`,
+    "whatsapp_list_contacts",
+    `List saved WhatsApp contacts. At least one of \`query\` or \`tag\` is required.
+  • query  — substring match on contact name, pushname, or phone number
+  • tag    — filter by tag (e.g. family, work, partner, followup)
+
+Auto-refreshes the contacts and chats caches from the WhatsApp app before
+querying (free — iterates the in-memory Store, no server calls).
+
+Each result includes its tags and — when the contact has an active chat —
+chat activity fields (timestamp, unreadCount, archived, pinned, lastMessage).
+Pass a contact's id into whatsapp_get_messages to read the conversation.
+
+Default tags: family, work, partner, followup. Custom tags are auto-created
+on first use via whatsapp_tag_contacts.`,
     {
-      since: z.string().describe("ISO datetime string — only return chats with activity at or after this timestamp"),
+      query: z.string().optional().describe("Name, pushname, or phone substring"),
+      tag: z.string().optional().describe("Tag name (family, work, partner, followup, or any custom)"),
     },
-    async ({ since }) => {
+    async ({ query, tag }) => {
+      if (!query && !tag) {
+        return { content: [{ type: "text", text: "Pass at least one of `query` or `tag`." }], isError: true };
+      }
+      let warning = null;
       try {
-        const chats = cache.listChats(since);
-        return { content: [{ type: "text", text: JSON.stringify(chats) }] };
+        await autoSyncContactsChats();
+      } catch (err) {
+        warning = `Auto-sync failed (${err.message}) — serving cached data.`;
+      }
+      try {
+        const results = cache.listContactsFiltered({ query, tag });
+        const body = JSON.stringify(localizeResults(results), null, 2);
+        const text = warning ? `${warning}\n\n${body}` : body;
+        return { content: [{ type: "text", text }] };
       } catch (err) {
         return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
       }
     }
   );
 
-  // ── whatsapp_find ─────────────────────────────────────────
-
-  server.tool(
-    "whatsapp_find",
-    `Find people, groups, or chats by name, tag, date, or filter.
-Searches both contacts and chats caches in a single merged view — contacts provide
-identity (name, number), chats provide activity (last message, unread count, timestamps).
-Never calls the API — use whatsapp_sync first if caches are empty.
-Each result includes its tags array.
-Default tags: family, work, partner, followup. Custom tags are auto-created when first used.
-When the user refers to someone by relationship (e.g. girlfriend, wife, coworker, brother), search by the matching tag — not by name.
-When no params are given, defaults to today's activity only.`,
-    {
-      query: z.string().optional().describe("Name or phone number to search for"),
-      tag: z.string().optional().describe("Filter by tag (e.g. family, work, partner, followup)"),
-      from: z.string().optional().describe("ISO date (YYYY-MM-DD) — entries with activity on or after this date"),
-      filter: z.enum(["pinned", "unread", "groups"]).optional().describe("Filter: pinned, unread, or groups only"),
-    },
-    async ({ query, tag, from, filter }) => {
-      try {
-        let results = cache.find({ query, tag, from, filter });
-
-        if (results.length === 0 && query && !tag) {
-          const mapped = RELATIONSHIP_TAGS[query.toLowerCase()];
-          if (mapped) {
-            results = cache.find({ tag: mapped, from, filter });
-            if (results.length > 0) {
-              return { content: [{ type: "text", text: `No contact named "${query}", but found results via the "${mapped}" tag:\n${JSON.stringify(localizeResults(results), null, 2)}` }] };
-            }
-          }
-        }
-
-        if (results.length === 0) {
-          const reason = tag ? `No results found with tag "${tag}".`
-            : query ? `No results found matching "${query}".`
-            : "No results found. The cache may be empty — use whatsapp_sync first.";
-          return { content: [{ type: "text", text: reason }] };
-        }
-        return { content: [{ type: "text", text: JSON.stringify(localizeResults(results), null, 2) }] };
-      } catch (err) {
-        return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
-      }
-    }
-  );
-
-  // ── whatsapp_get_messages ─────────────────────────────────
+  // ── whatsapp_get_messages ────────────────────────────────
 
   server.tool(
     "whatsapp_get_messages",
-    `ALWAYS call this FIRST when the user asks for messages — before syncing.
-This reads from the local cache with zero API calls.
-If you don't have an exact contact name, use whatsapp_find to resolve it first.
-If the cache is empty, tell the user and offer to sync — do NOT auto-sync.
-Output is pre-formatted — show it directly to the user WITHOUT reformatting or summarizing.
-NEVER summarize, paraphrase, or skip messages. Show the FULL output as-is.`,
+    `Read messages from a specific WhatsApp chat by id.
+Pass the chat_id returned by whatsapp_list_chats or whatsapp_list_contacts.
+
+Auto-sync behavior:
+  • Cold chat (no cached messages)      → fetches everything available.
+    This is the one branch that triggers real WhatsApp server requests;
+    capped at ~5000 messages of back-history per call.
+  • Warm chat with new activity          → incrementally fetches only the
+    messages added since the newest cached one.
+  • Warm chat with no new activity       → zero network calls, cache only.
+
+Default window: last 48 hours. Use \`since\` (ISO datetime) for a different cutoff.
+
+Output is pre-formatted — paste the entire block verbatim. Do NOT summarize,
+paraphrase, abbreviate, or skip any messages. Show EVERY line.`,
     {
-      chat: z.string().describe("Contact name, group name, or phone number"),
-      since: z.string().optional().describe("ISO date (YYYY-MM-DD) — only return messages from this date onward. Default: last 24h."),
+      chat_id: z.string().describe("Chat id from list_chats / list_contacts (e.g. '1234@c.us' or '1234@g.us')"),
+      since: z.string().optional().describe("ISO datetime — only return messages at or after this time. Default: 48h ago."),
     },
-    async ({ chat: query, since }) => {
+    async ({ chat_id, since }) => {
+      let warning = null;
       try {
-        const result = cache.getMessages(query, since);
-        if (result.error) return { content: [{ type: "text", text: result.error }] };
-        if (result.messages.length === 0) {
-          return { content: [{ type: "text", text: `No messages found for "${result.chat}". Want me to sync?` }] };
+        const syncCutoff = since || new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+        await autoSyncMessages(chat_id, syncCutoff);
+      } catch (err) {
+        warning = `Auto-sync failed (${err.message}) — serving cached messages only.`;
+      }
+      try {
+        const messages = cache.readCachedMessages(chat_id, since);
+        const chatName = cache.getCachedChatName(chat_id);
+
+        if (messages.length === 0) {
+          const empty = `No messages cached for "${chatName}" in the requested window.`;
+          return { content: [{ type: "text", text: warning ? `${warning}\n${empty}` : empty }] };
         }
+
         const mentionMap = cache.getMentionMap();
-        const formatted = formatMessages(result.messages, result.chat, mentionMap);
-        const output = `[VERBATIM — paste this entire block into your response. Do NOT summarize or skip lines.]\n\n${formatted}`;
+        const formatted = formatMessages(messages, chatName, mentionMap);
+        const header = warning ? `${warning}\n\n` : "";
+        const output = `${header}[VERBATIM — paste this entire block into your response. Do NOT summarize or skip lines.]\n\n${formatted}`;
         return { content: [{ type: "text", text: output, annotations: { audience: ["user"], priority: 1.0 } }] };
       } catch (err) {
         return { content: [{ type: "text", text: `Error: ${err.message}` }], isError: true };
@@ -362,19 +338,24 @@ NEVER summarize, paraphrase, or skip messages. Show the FULL output as-is.`,
     }
   );
 
-  // ── whatsapp_tag_contacts ─────────────────────────────────
+  // ── whatsapp_tag_contacts ────────────────────────────────
 
   server.tool(
     "whatsapp_tag_contacts",
-    `Add or remove tags from one or more WhatsApp contacts in a single call.
+    `Add or remove tags on one or more WhatsApp contacts in a single call.
 Each entry specifies a contact, the tags, and whether to add or remove.
-Looks up each contact by name or phone number in the local cache — sync contacts first if needed.
-Default tags: family, work, partner, followup. Custom tags are auto-created when first used.
-If a contact is not found but candidates exist, all possible matches are listed —
-present every candidate to the user and ask which one they meant before retrying.`,
+Contacts can be referenced by name, phone number, or the id returned by
+whatsapp_list_contacts — the cache is already up to date from the last
+list call, no separate sync needed.
+
+Default tags: family, work, partner, followup. Custom tags are auto-created
+when first used.
+If a contact is not found but candidates exist, all possible matches are
+listed — present every candidate to the user and ask which one they meant
+before retrying.`,
     {
       entries: z.array(z.object({
-        contact: z.string().describe("Contact or group name, or phone number"),
+        contact: z.string().describe("Contact or group name, phone number, or id"),
         tags: z.array(z.string()).describe('Tag names (e.g. ["family", "followup"])'),
         action: z.enum(["add", "remove"]).default("add").describe('"add" (default) or "remove"'),
       })).describe("List of { contact, tags, action } entries to process"),
@@ -394,32 +375,6 @@ present every candidate to the user and ask which one they meant before retrying
         }
       }
       return { content: [{ type: "text", text: lines.join("\n") }] };
-    }
-  );
-
-  // ── whatsapp_send (NEW) ───────────────────────────────────
-
-  server.tool(
-    "whatsapp_send",
-    `Send a text message to a WhatsApp contact or group.
-Resolves the contact name to an ID from the local cache, then sends via WhatsApp Web.
-This is safe — it uses the official WhatsApp Web interface, not an unofficial API.
-Always confirm with the user before sending.`,
-    {
-      chat: z.string().describe("Contact name, group name, or phone number"),
-      message: z.string().describe("Text message to send"),
-    },
-    async ({ chat: query, message }) => {
-      try {
-        const resolved = cache.resolveChatByName(query) || cache.resolveContact(query);
-        if (!resolved) {
-          return { content: [{ type: "text", text: `No contact found matching "${query}". Sync contacts first.` }] };
-        }
-        const result = await callRenderer("sendMessage", [resolved.id, message]);
-        return { content: [{ type: "text", text: `Message sent to ${resolved.name}: "${message}"` }] };
-      } catch (err) {
-        return { content: [{ type: "text", text: `Error sending message: ${err.message}` }], isError: true };
-      }
     }
   );
 
