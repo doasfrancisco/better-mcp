@@ -47,6 +47,33 @@ Good: `fix: deduplicate subsidiary query to avoid double-counting schedules`
 Bad: `chore: update dependencies` — why now?
 Good: `chore: bump django to 4.2.9 to patch CVE-2024-XXXXX`
 
+Before writing the message, inspect both:
+
+- the staged diff
+- the current chat context / recent user requests
+
+Check whether the staged work represents **one logical change** or **multiple logical changes bundled together** because everything was staged with `git add .`.
+
+If the diff includes multiple distinct tasks or features, the commit message must say so explicitly instead of pretending everything is one small change. In that case:
+
+- write a multi-line conventional commit message
+- use one `type:` line per logical change
+- make each line include both **what** changed and **why**
+- order the lines by importance, with the main user-facing change first
+
+Bad multi-change message:
+`feat: update spotify playback`
+
+Good multi-change message:
+`feat: return playlist context in spotify playback responses to show what started playing
+feat: add Droid MCP and skill deployment guidance to document the new local setup`
+
+Another good multi-change message:
+`feat: deploy personal skills to Droid to keep Claude and Droid installs in sync
+docs: update skill guidelines to point at deploy_skills.py and Droid skill folders`
+
+Do NOT invent a fake single-feature message when the diff clearly contains unrelated or semi-related work. The message should reflect the true scope of the commit.
+
 Read the diff to understand the changes, then write the message. Use a HEREDOC:
 
 ```bash
