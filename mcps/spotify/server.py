@@ -181,12 +181,17 @@ def spotify_list_tracks(playlist_id: str) -> str:
         return _json({"source": "Liked Songs", "total": results["total"], "tracks": tracks})
 
     results = sp.playlist_items(playlist_id, limit=50, additional_types=("track",))
+    total = results["total"]
     tracks = []
-    for item in results["items"]:
-        t = item.get("track")
-        if t is not None:
-            tracks.append(_format_track(t))
-    return _json({"total": results["total"], "tracks": tracks})
+    while True:
+        for item in results["items"]:
+            t = item.get("item")
+            if t is not None:
+                tracks.append(_format_track(t))
+        if results["next"] is None:
+            break
+        results = sp.next(results)
+    return _json({"total": total, "tracks": tracks})
 
 
 # ── Playback ──────────────────────────────────────────────────────────

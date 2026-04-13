@@ -22,6 +22,14 @@ def available_skills():
     return sorted(d.name for d in SKILLS_SRC.iterdir() if d.is_dir())
 
 
+def installed_skills():
+    installed = set()
+    for root in DESTINATIONS.values():
+        if root.is_dir():
+            installed.update(d.name for d in root.iterdir() if d.is_dir())
+    return sorted(installed)
+
+
 def deploy_skill(name: str):
     src = SKILLS_SRC / name
 
@@ -78,15 +86,33 @@ def diff_skill(name: str):
             print(f"{GREEN}  '{name}' is up to date{RESET}")
 
 
+def remove_skills(names: list[str]):
+    # IMPORTANT: Callers should still make sure the user actually wanted this
+    # before running `--remove`, because it deletes the named skills from both
+    # ~/.claude/skills and ~/.factory/skills in one shot with no extra prompt.
+
+    for name in names:
+        found = False
+        for label, root in DESTINATIONS.items():
+            dst = root / name
+            if dst.is_dir():
+                found = True
+                shutil.rmtree(dst)
+                print(f"{GREEN}Removed '{name}' from {dst} [{label}]{RESET}")
+        if not found:
+            print(f"{YELLOW}'{name}' is not installed in Claude or Droid{RESET}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Deploy skills to Claude and Droid personal skill folders.")
     parser.add_argument("--add", nargs="+", metavar="SKILL", help="Deploy one or more skills")
     parser.add_argument("--all", action="store_true", help="Deploy all skills")
     parser.add_argument("--diff", metavar="SKILL", help="Show what would change without deploying")
     parser.add_argument("--list", action="store_true", help="List available skills")
+    parser.add_argument("--remove", nargs="+", metavar="SKILL", help="Remove one or more installed skills from both Claude and Droid")
     args = parser.parse_args()
 
-    if args.list or (not args.add and not args.all and not args.diff):
+    if args.list or (not args.add and not args.all and not args.diff and not args.remove):
         print("Available skills:")
         for name in available_skills():
             statuses = []
@@ -95,11 +121,13 @@ def main():
                 statuses.append(f"{label}: {status}")
             print(f"  {name}  ({', '.join(statuses)})")
         if not args.list:
-            print(f"\nUsage: python {Path(__file__).name} --add <skill> [...] | --all | --diff <skill>")
+            print(f"\nUsage: python {Path(__file__).name} --add <skill> [...] | --all | --diff <skill> | --remove <skill> [...]")
         return
 
     if args.diff:
         diff_skill(args.diff)
+    elif args.remove:
+        remove_skills(args.remove)
     elif args.all:
         for name in available_skills():
             deploy_skill(name)

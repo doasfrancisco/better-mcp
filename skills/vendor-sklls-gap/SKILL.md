@@ -1,17 +1,27 @@
 ---
-name: vendor-skills-gap-fix
-description: Query documentation sites via nia-docs when you need to look up docs for a library, cloud provider, or framework. Use proactively when the user says "ask nia", "check the docs", "look it up", or invokes /vendor-skills-gap-fix.
+name: vendor-sklls-gap
+description: Fill vendor skill gaps when a built-in or custom skill reaches for the wrong tool or misses a vendor-specific workflow. Use proactively when a skill starts using the wrong integration, when the user asks to use a specific vendor workflow, or when invoked as /vendor-sklls-gap.
 ---
 
-# vendor-skills-gap-fix
+# vendor-sklls-gap
 
-Use `npx nia-docs` to browse any documentation site as a virtual filesystem. You can `ls`, `grep`, `cat`, and pipe — standard bash.
+Use this skill to patch gaps in vendor-oriented skills. Keep it organized by vendor/tool so more sections can be added over time.
 
 Do not explain what you're about to do. Just run the commands.
 
-## How to query docs
+## Nia
 
-### 1. Index at the most specific URL you can
+When the user explicitly says `ask nia`, `use /nia`, or otherwise asks for Nia, do not use `nia-docs` as a substitute. Use the actual `nia` skill / workflow instead.
+
+Only use `npx nia-docs` when the task is specifically about browsing a documentation site as a virtual filesystem and there is not a better vendor-specific path.
+
+## Nia docs browsing
+
+Use `npx nia-docs` to browse a documentation site as a virtual filesystem. You can `ls`, `grep`, `cat`, and pipe — standard bash.
+
+### How to query docs
+
+#### 1. Index at the most specific URL you can
 
 Top-level sites crawl shallowly. Subdirectories crawl deeply and give you the real content.
 
@@ -33,7 +43,7 @@ npx nia-docs https://docs.aws.amazon.com/ -c "ls AmazonECS/latest"
 
 Then re-index at the subdirectory for full depth.
 
-### 2. Find files
+#### 2. Find files
 
 ```bash
 # Find files by name
@@ -43,7 +53,7 @@ npx nia-docs <url> -c "ls | grep -i <keyword>"
 npx nia-docs <url> -c "grep -rl '<pattern>'"
 ```
 
-### 3. Read content
+#### 3. Read content
 
 ```bash
 # Full file
@@ -53,11 +63,11 @@ npx nia-docs <url> -c "cat getting-started.html"
 npx nia-docs <url> -c "cat getting-started.html" 2>&1 | head -150
 ```
 
-### 4. Cache
+#### 4. Cache
 
 After the first run the site is cached — subsequent calls are instant. No need to re-index.
 
-## Example: finding ECS Express Mode docs
+### Example: finding ECS Express Mode docs
 
 ```bash
 # 1. Start at top level, find the ECS directory
@@ -80,7 +90,7 @@ npx nia-docs https://docs.aws.amazon.com/AmazonECS/latest/developerguide/ -c "ls
 npx nia-docs https://docs.aws.amazon.com/AmazonECS/latest/developerguide/ -c "cat express-service-getting-started.html"
 ```
 
-## Common documentation URLs
+### Common documentation URLs
 
 | Service | URL |
 |---------|-----|
@@ -94,7 +104,7 @@ npx nia-docs https://docs.aws.amazon.com/AmazonECS/latest/developerguide/ -c "ca
 | Stripe | `https://docs.stripe.com/` |
 | Claude Platform | `https://platform.claude.com/docs/` |
 
-## Do not
+### Do not
 
 - **Do not run nia-docs interactively** — always use `-c "<command>"`.
 - **Do not skip the subdirectory step** — top-level URLs give you a shallow index (e.g., 2 files instead of 414). Always navigate to the specific docs section and re-index there.
