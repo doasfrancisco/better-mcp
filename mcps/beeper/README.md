@@ -20,17 +20,17 @@ Query Beeper Desktop (local API at `http://localhost:23373`) from AI assistants.
 5. Install dependencies:
    ```bash
    cd mcps/beeper
-   python -m pip install -r requirements.txt
+   uv sync
    ```
 
 ## Run it locally
 
 ```bash
-python server.py
+uv run fastmcp run server.py
 ```
 
 ## Connect to Claude Code
 
 ```bash
-claude mcp add -s user beeper -- python C:/Francisco/github-repositories/mcp_servers/mcps/beeper/server.py
+claude mcp add -s user beeper -- uv run --directory C:/Francisco/github-repositories/mcp_servers/mcps/beeper fastmcp run server.py
 ```

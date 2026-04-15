@@ -1,0 +1,9 @@
+[project]
+name = "beeper-mcp"
+version = "1.0.0"
+requires-python = ">=3.11"
+dependencies = [
+    "fastmcp==3.0.2",
+    "python-dotenv>=1.0",
+    "beeper-desktop-api @ git+https://github.com/beeper/desktop-api-python.git",
+]
