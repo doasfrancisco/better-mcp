@@ -34,6 +34,9 @@ mcps/whatsapp/messages/
 mcps/whatsapp/dist/
 mcps/whatsapp/backup-*/
 
+# Beeper — local tag store
+mcps/beeper/tags.json
+
 # GLPI
 mcps/glpi/.session.json
 mcps/glpi/.venv/
