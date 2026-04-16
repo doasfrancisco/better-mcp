@@ -10,22 +10,24 @@ Run Beeper Desktop headless on a Linux VPS so the WhatsApp MCP HTTP server is al
                                                               [Xvfb virtual display :99]
 ```
 
-Three systemd services keep everything alive:
+Four systemd services keep everything alive:
 1. **xvfb** — virtual framebuffer so Beeper thinks there's a screen
 2. **beeper** — Beeper Desktop running headless under Xvfb
 3. **whatsapp-mcp** — FastMCP HTTP server exposing the MCP tools
+4. **x11vnc** — VNC server mirroring the virtual display for remote access
 
 ## Prerequisites
 
 - Ubuntu 24.04 VPS with SSH access
 - RDP access (xrdp) for one-time Beeper authentication
-- Port 23380 open in your cloud provider's firewall (e.g. Azure NSG)
+- Ports 23380 (MCP) and 5900 (VNC) open in your cloud provider's firewall (e.g. Azure NSG)
+- A VNC viewer on your local machine (e.g. [TigerVNC Viewer](https://sourceforge.net/projects/tigervnc/files/stable/) — download `vncviewer64-*.exe`, standalone, no install)
 
 ## Step 1: Install dependencies
 
 ```bash
 sudo apt update
-sudo apt install -y xvfb libgtk-3-0 libnotify4 libnss3 libxss1 \
+sudo apt install -y xvfb x11vnc libgtk-3-0 libnotify4 libnss3 libxss1 \
   libasound2t64 libgbm1 git curl
 ```
 
@@ -177,47 +179,70 @@ WantedBy=multi-user.target
 EOF
 ```
 
+### x11vnc service (VNC into the virtual display)
+
+```bash
+sudo tee /etc/systemd/system/x11vnc.service <<'EOF'
+[Unit]
+Description=x11vnc mirror for Xvfb display :99
+After=xvfb.service
+Requires=xvfb.service
+
+[Service]
+ExecStart=/usr/bin/x11vnc -display :99 -nopw -forever -shared
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+```
+
 ### Enable and start
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable xvfb beeper whatsapp-mcp
-sudo systemctl start xvfb beeper whatsapp-mcp
+sudo systemctl enable xvfb beeper whatsapp-mcp x11vnc
+sudo systemctl start xvfb beeper whatsapp-mcp x11vnc
 ```
 
 ### Verify
 
 ```bash
-sudo systemctl status xvfb beeper whatsapp-mcp
+sudo systemctl status xvfb beeper whatsapp-mcp x11vnc
 curl http://localhost:23373/v1/info    # Beeper API
 curl http://localhost:23380/mcp        # MCP server
 ```
 
-## Step 7: Open the port
+## Step 7: Open ports
 
-The MCP server binds to `0.0.0.0:23380` but cloud providers block inbound traffic by default. You need to open the port in both the cloud firewall and (optionally) the OS firewall.
+The MCP server binds to `0.0.0.0:23380` and x11vnc to `0.0.0.0:5900`, but cloud providers block inbound traffic by default. You need to open both ports.
 
 ### Azure
 
 1. Go to your VM in the Azure Portal
 2. **Networking → Network settings**
-3. Click **Add inbound port rule** (or find the existing NSG rules)
-4. Fill in:
-   - **Destination port ranges**: `23380`
-   - **Protocol**: TCP
-   - **Action**: Allow
-   - **Priority**: `1010` (any unused number)
-   - **Name**: `AllowMCP`
-5. Click **Add**. Takes ~30 seconds to propagate.
+3. Click **Add inbound port rule** and create two rules:
+
+| Field | MCP rule | VNC rule |
+|-------|----------|----------|
+| Destination port ranges | `23380` | `5900` |
+| Protocol | TCP | TCP |
+| Action | Allow | Allow |
+| Priority | `1010` | `1020` |
+| Name | `AllowMCP` | `AllowVNC` |
+
+4. Click **Add** for each. Takes ~30 seconds to propagate.
 
 ### AWS
 
-Security Group → Edit inbound rules → Add rule → Custom TCP, port 23380, source 0.0.0.0/0.
+Security Group → Edit inbound rules → Add two rules: Custom TCP port 23380 and Custom TCP port 5900, source 0.0.0.0/0.
 
 ### Ubuntu firewall (if enabled)
 
 ```bash
 sudo ufw allow 23380/tcp
+sudo ufw allow 5900/tcp
 ```
 
 ## Step 8: Register in Claude Code
@@ -226,6 +251,30 @@ sudo ufw allow 23380/tcp
 claude mcp remove whatsapp
 claude mcp add -s user --transport http whatsapp http://<your-vps-ip>:23380/mcp
 ```
+
+## VNC access (interact with headless Beeper)
+
+The x11vnc service mirrors Xvfb display `:99` — the same display Beeper runs on. Connect with any VNC viewer to `<your-vps-ip>:5900` to see and interact with Beeper without stopping any services.
+
+Use this to:
+- **Trigger message backfill** — a fresh Beeper install only has recent messages. Open chats in the VNC viewer and scroll up to fetch older history from WhatsApp's servers.
+- **Debug Beeper issues** — see exactly what Beeper is showing on the virtual display.
+- **Change settings** — toggle Desktop API, manage accounts, etc.
+
+### Recommended VNC viewer
+
+[TigerVNC Viewer](https://sourceforge.net/projects/tigervnc/files/stable/) — download `vncviewer64-<version>.exe` (standalone, no install). Don't download the `-winvnc-` file (that's a server).
+
+## Message backfill
+
+A freshly installed Beeper instance only has recent messages (~last few hours). Older messages are fetched from WhatsApp's servers when you scroll up in a chat.
+
+To backfill important chats:
+1. Connect via VNC to `<your-vps-ip>:5900`
+2. Open each chat you care about and scroll up as far as needed
+3. Disconnect — messages are now in Beeper's local database and available via the MCP
+
+There is no API to trigger backfill programmatically. Beeper also backfills gradually in the background over time, but scrolling is the fastest way.
 
 ## Common errors
 
@@ -289,17 +338,17 @@ This is **normal**. The MCP server is alive — curl just isn't a valid MCP clie
 
 ```bash
 # Check status
-sudo systemctl status xvfb beeper whatsapp-mcp
+sudo systemctl status xvfb beeper whatsapp-mcp x11vnc
 
 # View logs
 journalctl -u whatsapp-mcp --no-pager -n 50
 journalctl -u beeper --no-pager -n 50
 
 # Restart everything
-sudo systemctl restart xvfb beeper whatsapp-mcp
+sudo systemctl restart xvfb beeper whatsapp-mcp x11vnc
 
 # Stop everything
-sudo systemctl stop whatsapp-mcp beeper xvfb
+sudo systemctl stop whatsapp-mcp x11vnc beeper xvfb
 
 # Update the MCP code
 cd ~/github-repositories/better-mcp && git pull && cd mcps/whatsapp && uv sync
