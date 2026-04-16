@@ -6,4 +6,6 @@ dependencies = [
     "fastmcp==3.0.2",
     "python-dotenv>=1.0",
     "beeper-desktop-api @ git+https://github.com/beeper/desktop-api-python.git",
+    "pystray>=0.19",
+    "pillow>=10",
 ]
