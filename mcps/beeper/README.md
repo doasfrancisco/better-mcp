@@ -7,6 +7,10 @@ Query Beeper Desktop (local API at `http://localhost:23373`) from AI assistants.
 | Tool | What it does |
 |------|---------------|
 | `beeper_get_my_info` | Returns `/v1/info` server metadata + `/v1/accounts` connected networks. |
+| `whatsapp_list_chats` | List WhatsApp chats (DMs + groups) filtered by `query`, `tag`, and/or `since` (ISO timestamp). |
+| `whatsapp_get_messages` | Read messages in a chat by `chat_id`. Default window: last 48h; override via `since` (ISO datetime). |
+| `whatsapp_download_files` | Download attachment tokens from `get_messages` output into `~/Downloads`. |
+| `whatsapp_tag_contacts` | Add/remove tags on chats by `chat_id` (from `list_chats`). Batch: `[{chat_id, tags, action}]`. |
 
 ## Setup
 
