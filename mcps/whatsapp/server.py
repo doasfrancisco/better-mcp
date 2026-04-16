@@ -199,7 +199,7 @@ def _format_messages(messages: list[dict]) -> str:
     lines: list[str] = []
     last_date = ""
     for m in messages:
-        dt = _parse_ts(m.get("timestamp"))
+        dt = _parse_ts(m.get("timestamp")).astimezone()
         date_key = dt.strftime("%Y-%m-%d")
         if date_key != last_date:
             last_date = date_key
