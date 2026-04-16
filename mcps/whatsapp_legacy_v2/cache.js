@@ -3,7 +3,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 
-const DATA_DIR = "C:/Francisco/github-repositories/mcp_servers/mcps/whatsapp";
+const DATA_DIR = "C:/Francisco/github-repositories/mcp_servers/mcps/whatsapp_legacy_v2";
 export const CONTACTS_CACHE = join(DATA_DIR, "contacts.json");
 export const CHATS_CACHE = join(DATA_DIR, "chats.json");
 export const TAGS_CACHE = join(DATA_DIR, "tags.json");

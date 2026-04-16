@@ -26,16 +26,16 @@ mcps/whatsapp_legacy/tags.json
 mcps/whatsapp_legacy/messages/
 mcps/whatsapp_legacy/node_modules/
 
-# WhatsApp Electron — cache, build output & local data
-mcps/whatsapp/contacts.json
-mcps/whatsapp/chats.json
-mcps/whatsapp/tags.json
-mcps/whatsapp/messages/
-mcps/whatsapp/dist/
-mcps/whatsapp/backup-*/
+# WhatsApp Electron legacy v2 — cache, build output & local data
+mcps/whatsapp_legacy_v2/contacts.json
+mcps/whatsapp_legacy_v2/chats.json
+mcps/whatsapp_legacy_v2/tags.json
+mcps/whatsapp_legacy_v2/messages/
+mcps/whatsapp_legacy_v2/dist/
+mcps/whatsapp_legacy_v2/backup-*/
 
-# Beeper — local tag store
-mcps/beeper/tags.json
+# WhatsApp (Beeper-backed) — local tag store
+mcps/whatsapp/tags.json
 
 # GLPI
 mcps/glpi/.session.json
