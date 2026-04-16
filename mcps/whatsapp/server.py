@@ -312,46 +312,36 @@ _BEEPER_TOKEN = os.getenv("BEEPER_ACCESS_TOKEN", "")
 
 
 @mcp.tool()
-def whatsapp_download_files(tokens: list[str]) -> list:
-    """Download attachments shown as [token] in whatsapp_get_messages output.
+def whatsapp_download_files(token: str) -> File:
+    """Download a single attachment shown as [token] in whatsapp_get_messages output.
 
-      • tokens — list of hash tokens (e.g. "hash.jpg") from get_messages
+      • token — hash token (e.g. "hash.jpg") from get_messages
 
     Streams file bytes from Beeper's serve endpoint and returns them directly
     to the client. No files are saved on the server.
+    Save the returned file to ~/Downloads with the token as the filename.
     """
     prefix = _get_media_prefix()
-    results = []
 
-    for t in tokens:
-        if not t:
-            results.append("ERROR: empty token")
-            continue
+    is_raw_url = token.startswith(("mxc://", "localmxc://"))
+    if is_raw_url:
+        mxc_url = token
+        name = token.split("/")[-1]
+    else:
+        p = Path(token)
+        hash_part, ext = p.stem, p.suffix
+        mxc_url = f"{prefix}{hash_part}"
+        name = token
 
-        is_raw_url = t.startswith(("mxc://", "localmxc://"))
-        if is_raw_url:
-            mxc_url = t
-            name = t.split("/")[-1]
-        else:
-            p = Path(t)
-            hash_part, ext = p.stem, p.suffix
-            mxc_url = f"{prefix}{hash_part}"
-            name = t
-
-        try:
-            resp = httpx.get(
-                f"{_BEEPER_BASE}/v1/assets/serve",
-                params={"url": mxc_url},
-                headers={"Authorization": f"Bearer {_BEEPER_TOKEN}", "Accept": "*/*"},
-                timeout=60,
-            )
-            resp.raise_for_status()
-            fmt = Path(name).suffix.lstrip(".") or "bin"
-            results.append(File(data=resp.content, format=fmt, name=name))
-        except Exception as e:
-            results.append(f"ERROR ({t}): {type(e).__name__}: {str(e)[:120]}")
-
-    return results
+    resp = httpx.get(
+        f"{_BEEPER_BASE}/v1/assets/serve",
+        params={"url": mxc_url},
+        headers={"Authorization": f"Bearer {_BEEPER_TOKEN}", "Accept": "*/*"},
+        timeout=60,
+    )
+    resp.raise_for_status()
+    fmt = Path(name).suffix.lstrip(".") or "bin"
+    return File(data=resp.content, format=fmt, name=name)
 
 
 if __name__ == "__main__":
