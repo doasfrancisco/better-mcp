@@ -15,8 +15,15 @@ Run `git status` to see what will be staged. Review the actual file list for:
 - **Internal data** — data dumps, migration exports, board exports, JSON/CSV with names/tasks/internal info, database exports. Any folder that looks like a one-off dump (e.g. `*-migration/`, `*-export/`, `*-dump/`) is a red flag.
 - **Large binaries** — blobs, images, compiled files that don't belong in git
 - **Files that should be gitignored** — check if the repo is public, and whether the file contains anything that shouldn't be on GitHub
+- **Local filesystem paths** — grep staged text files (README, docs, configs, examples) for absolute local paths: `C:\Users\...`, `C:/Francisco/...`, `/Users/<name>/...`, `/home/<name>/...`, `/mnt/c/...`, `~/<name>/...`. These leak the author's machine layout and username. Also watch for hardcoded local hostnames, LAN IPs (`192.168.*`, `10.*`), and `localhost:<port>` references that only make sense on the author's box.
 
-Only stop if you find a **real problem**. Do NOT theorize about what .gitignore *could* be missing — check the actual files. If every file in the diff is safe, move on silently.
+Local paths are a **fixable cosmetic leak**, not a blocker. When you find one:
+
+1. Replace it with a generic placeholder (`/path/to/repo`, `<repo-root>`, `~/projects/<repo>`) or a repo-relative path.
+2. If the path is inside an example command, keep the command runnable — use a clearly-placeholder token like `<your-username>` so readers know to substitute.
+3. Re-stage the edited file before committing. Do NOT ask the user for permission to scrub a local path — just fix it and mention it in the heads-up.
+
+Only stop if you find a **real problem** (secrets, dumps, binaries). Do NOT theorize about what .gitignore *could* be missing — check the actual files. If every file in the diff is safe, move on silently.
 
 ## 2. Initialize git if missing
 
