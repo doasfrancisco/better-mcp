@@ -156,30 +156,28 @@ Cloud **rejects unbounded queries** — every JQL must have at least one filter 
 
 ## What the MCP server exposes
 
-| Tool | Library method |
+The server bundles related reads into composed tools so the AI gets everything
+it needs in one call instead of fanning out into 5+ round-trips.
+
+| Tool | Library methods called |
 |---|---|
 | `jira_search_issues` | `jql()` |
-| `jira_get_issue` | `issue()` |
-| `jira_get_issue_changelog` | `get_issue_changelog()` |
-| `jira_get_issue_transitions` | `get_issue_transitions()` (read only) |
-| `jira_get_issue_status_changelog` | `get_issue_status_changelog()` |
-| `jira_get_issue_comments` | `issue_get_comments()` |
-| `jira_get_issue_worklog` | `issue_get_worklog()` |
-| `jira_get_issue_watchers` | `issue_get_watchers()` |
-| `jira_get_issue_attachments` | `get_attachments_ids_from_issue()` |
+| `jira_get_issue` | `issue()` + `get_issue_changelog()` + `get_issue_status_changelog()` + `issue_get_comments()` + `issue_get_worklog()` + `issue_get_watchers()` + `get_attachments_ids_from_issue()` + `get_issue_transitions()` |
 | `jira_get_attachment` | `get_attachment()` |
 | `jira_list_projects` | `projects()` |
-| `jira_get_project` | `project()` |
-| `jira_get_project_components` | `get_project_components()` |
-| `jira_get_project_versions` | `get_project_versions()` |
-| `jira_get_project_issue_count` | `get_project_issues_count()` |
+| `jira_get_project` | `project()` + `get_project_components()` + `get_project_versions()` + `get_project_issues_count()` |
 | `jira_search_users` | `user_find_by_user_string()` |
 | `jira_get_myself` | `myself()` |
 | `jira_list_boards` | `get_all_agile_boards()` |
 | `jira_list_board_sprints` | `get_all_sprints_from_board()` |
 | `jira_get_sprint_issues` | `get_all_issues_for_sprint_in_board()` |
-| `jira_list_fields` | `get_all_fields()` |
-| `jira_list_statuses` | `get_all_statuses()` |
-| `jira_list_priorities` | `get_all_priorities()` |
+| `jira_list_metadata` | `get_all_fields()` + `get_all_statuses()` + `get_all_priorities()` |
 
-Anything in this document that's **not** mapped to a tool above is intentionally excluded — either because it's a write operation, or because it's niche enough that the AI client can always reach for `jira` directly in Python if needed.
+The bundled tools (`jira_get_issue`, `jira_get_project`, `jira_list_metadata`)
+take no flags — they always return every facet. If a payload is larger than
+needed for a specific question, that's fine; the cost of one big call is lower
+than the cost of several serial small ones.
+
+Anything in this document that's **not** mapped to a tool above is intentionally
+excluded — either because it's a write operation, or because it's niche enough
+that the AI client can always reach for `jira` directly in Python if needed.

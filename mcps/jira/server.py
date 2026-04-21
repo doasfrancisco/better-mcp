@@ -31,6 +31,16 @@ Jira Cloud requires a bounded JQL query — always include at least one constrai
 (project = X, created >= -30d, assignee = currentUser(), status = "Open", etc.)
 before any ORDER BY.
 
+jira_get_issue returns the full ticket in one call: base fields + changelog +
+status history + comments + worklog + watchers + attachments + available
+transitions. Don't fan out into multiple sub-calls — everything is inlined.
+
+jira_get_project returns project metadata + components + versions + issue count
+in one call.
+
+jira_list_metadata returns all fields (system + custom) + statuses + priorities
+in one call — use it to resolve custom field IDs or status names before JQL.
+
 When presenting issues, format as:
   [STATUS] KEY-123 Summary (assignee · YYYY-MM-DD)
 """,
@@ -44,70 +54,27 @@ def jira_search_issues(
     jql: str,
     fields: str = "summary,status,priority,issuetype,assignee,reporter,created,updated,resolution,labels,project,parent",
     limit: int = 25,
-    start: int = 0,
+    next_page_token: Optional[str] = None,
     expand: Optional[str] = None,
     slim: bool = True,
 ) -> dict:
-    """Search Jira issues with JQL. Must include at least one filter clause."""
-    return j.search_issues(jql, fields=fields, limit=limit, start=start, expand=expand, slim=slim)
+    """Search Jira issues with JQL. Must include at least one filter clause
+    (Cloud rejects unbounded queries). Returns {isLast, nextPageToken, issues}.
+    To fetch the next page, pass the nextPageToken from the previous response."""
+    return j.search_issues(jql, fields=fields, limit=limit, next_page_token=next_page_token, expand=expand, slim=slim)
 
 
 @mcp.tool
-def jira_get_issue(
-    key: str,
-    fields: str = "*all",
-    expand: Optional[str] = "renderedFields,names,schema",
-    slim: bool = False,
-) -> Any:
-    """Get a single Jira issue by key (e.g. APM-720)."""
-    return j.get_issue(key, fields=fields, expand=expand, slim=slim)
-
-
-@mcp.tool
-def jira_get_issue_changelog(key: str, start: int = 0, limit: int = 50) -> Any:
-    """Get the field-change audit history for an issue."""
-    return j.get_issue_changelog(key, start=start, limit=limit)
-
-
-@mcp.tool
-def jira_get_issue_transitions(key: str) -> Any:
-    """List the workflow transitions currently available for an issue (read only)."""
-    return j.get_issue_transitions(key)
-
-
-@mcp.tool
-def jira_get_issue_status_changelog(key: str) -> Any:
-    """Get a cleaned status-transition history for an issue."""
-    return j.get_issue_status_changelog(key)
-
-
-@mcp.tool
-def jira_get_issue_comments(key: str) -> Any:
-    """Get all comments on an issue."""
-    return j.get_issue_comments(key)
-
-
-@mcp.tool
-def jira_get_issue_worklog(key: str) -> Any:
-    """Get all worklog entries for an issue."""
-    return j.get_issue_worklog(key)
-
-
-@mcp.tool
-def jira_get_issue_watchers(key: str) -> Any:
-    """Get the list of watchers for an issue."""
-    return j.get_issue_watchers(key)
-
-
-@mcp.tool
-def jira_get_issue_attachments(key: str) -> Any:
-    """List attachments on an issue (id + filename)."""
-    return j.get_issue_attachments(key)
+def jira_get_issue(key: str) -> dict:
+    """One-shot ticket view for a key (e.g. APM-720). Returns a dict with:
+    issue (full fields), changelog, status_changelog, comments, worklog,
+    watchers, attachments (list), transitions. No flags — always everything."""
+    return j.get_issue_full(key)
 
 
 @mcp.tool
 def jira_get_attachment(attachment_id: str) -> Any:
-    """Get metadata for a single attachment (mime type, size, URL)."""
+    """Get metadata for a single attachment by ID (mime type, size, URL)."""
     return j.get_attachment(attachment_id)
 
 
@@ -120,27 +87,10 @@ def jira_list_projects(expand: Optional[str] = None) -> Any:
 
 
 @mcp.tool
-def jira_get_project(key: str) -> Any:
-    """Get full project metadata by key (e.g. APM)."""
-    return j.get_project(key)
-
-
-@mcp.tool
-def jira_get_project_components(key: str) -> Any:
-    """List components for a project."""
-    return j.get_project_components(key)
-
-
-@mcp.tool
-def jira_get_project_versions(key: str) -> Any:
-    """List versions/releases for a project."""
-    return j.get_project_versions(key)
-
-
-@mcp.tool
-def jira_get_project_issue_count(key: str) -> Any:
-    """Get the total count of issues in a project."""
-    return j.get_project_issue_count(key)
+def jira_get_project(key: str) -> dict:
+    """One-shot project view for a key (e.g. APM). Returns a dict with:
+    project (metadata), components, versions, issue_count. No flags."""
+    return j.get_project_full(key)
 
 
 # ---------- users ----------
@@ -153,7 +103,8 @@ def jira_search_users(query: str, start: int = 0, limit: int = 25) -> Any:
 
 @mcp.tool
 def jira_get_myself() -> Any:
-    """Get the currently authenticated user (accountId, email, timezone)."""
+    """Get the currently authenticated user — includes accountId, email,
+    timezone, locale, group memberships (names), and application roles."""
     return j.get_myself()
 
 
@@ -211,21 +162,10 @@ def jira_get_sprint_issues(
 # ---------- metadata ----------
 
 @mcp.tool
-def jira_list_fields() -> Any:
-    """List all fields (system + custom). Useful for resolving custom field IDs."""
-    return j.list_fields()
-
-
-@mcp.tool
-def jira_list_statuses() -> Any:
-    """List all issue statuses across the instance."""
-    return j.list_statuses()
-
-
-@mcp.tool
-def jira_list_priorities() -> Any:
-    """List all issue priorities."""
-    return j.list_priorities()
+def jira_list_metadata() -> dict:
+    """One-shot instance metadata dump. Returns a dict with:
+    fields (all system + custom), statuses, priorities. No flags."""
+    return j.list_metadata()
 
 
 if __name__ == "__main__":

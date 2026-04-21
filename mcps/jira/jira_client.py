@@ -75,13 +75,12 @@ def search_issues(
     jql: str,
     fields: str = "summary,status,priority,issuetype,assignee,reporter,created,updated,resolution,labels,project,parent",
     limit: int = 25,
-    start: int = 0,
+    next_page_token: Optional[str] = None,
     expand: Optional[str] = None,
     slim: bool = True,
 ) -> dict:
     # Fail fast on unbounded queries — Jira Cloud rejects them with a 400
-    # wrapped in a cryptic Spanish error. Do the check here so the AI client
-    # gets a clear message instead.
+    # wrapped in a cryptic Spanish error.
     stripped = jql.strip().lower()
     if not stripped or stripped.startswith("order by"):
         raise ValueError(
@@ -90,47 +89,40 @@ def search_issues(
             "before any ORDER BY."
         )
 
-    result = _jira.jql(jql, fields=fields, start=start, limit=limit, expand=expand) or {}
+    # Use enhanced_jql (Cloud-native /rest/api/3/search/jql). The old jql()
+    # hits the deprecated /rest/api/2/search which no longer returns total /
+    # startAt / maxResults on Cloud. enhanced_jql returns nextPageToken + isLast
+    # and those ARE populated. Pass nextPageToken (received from a prior call)
+    # to fetch the next page.
+    result = _jira.enhanced_jql(
+        jql,
+        fields=fields,
+        nextPageToken=next_page_token,
+        limit=limit,
+        expand=expand,
+    ) or {}
     issues = result.get("issues", []) or []
     return {
-        "total": result.get("total"),
-        "startAt": result.get("startAt"),
-        "maxResults": result.get("maxResults"),
+        "isLast": result.get("isLast"),
+        "nextPageToken": result.get("nextPageToken"),
         "issues": [slim_issue(i) for i in issues] if slim else issues,
     }
 
 
-def get_issue(key: str, fields: str = "*all", expand: Optional[str] = "renderedFields,names,schema", slim: bool = False) -> Any:
-    iss = _jira.issue(key, fields=fields, expand=expand)
-    return slim_issue(iss) if slim else iss
-
-
-def get_issue_changelog(key: str, start: int = 0, limit: int = 50) -> Any:
-    return _jira.get_issue_changelog(key, start=start, limit=limit)
-
-
-def get_issue_transitions(key: str) -> Any:
-    return _jira.get_issue_transitions(key)
-
-
-def get_issue_status_changelog(key: str) -> Any:
-    return _jira.get_issue_status_changelog(key)
-
-
-def get_issue_comments(key: str) -> Any:
-    return _jira.issue_get_comments(key)
-
-
-def get_issue_worklog(key: str) -> Any:
-    return _jira.issue_get_worklog(key)
-
-
-def get_issue_watchers(key: str) -> Any:
-    return _jira.issue_get_watchers(key)
-
-
-def get_issue_attachments(key: str) -> Any:
-    return _jira.get_attachments_ids_from_issue(key)
+def get_issue_full(key: str) -> dict:
+    """One-shot: base issue + changelog + status history + comments + worklog +
+    watchers + attachments list + available transitions. Saves the AI from
+    making 5+ round-trips to understand a single ticket."""
+    return {
+        "issue": _jira.issue(key, fields="*all", expand="renderedFields,names,schema"),
+        "changelog": _jira.get_issue_changelog(key),
+        "status_changelog": _jira.get_issue_status_changelog(key),
+        "comments": _jira.issue_get_comments(key),
+        "worklog": _jira.issue_get_worklog(key),
+        "watchers": _jira.issue_get_watchers(key),
+        "attachments": _jira.get_attachments_ids_from_issue(key),
+        "transitions": _jira.get_issue_transitions(key),
+    }
 
 
 def get_attachment(attachment_id: str) -> Any:
@@ -143,20 +135,21 @@ def list_projects(expand: Optional[str] = None) -> Any:
     return _jira.projects(expand=expand)
 
 
-def get_project(key: str) -> Any:
-    return _jira.project(key)
+def get_project_full(key: str) -> dict:
+    """One-shot: project metadata + components + versions + approximate issue count.
 
-
-def get_project_components(key: str) -> Any:
-    return _jira.get_project_components(key)
-
-
-def get_project_versions(key: str) -> Any:
-    return _jira.get_project_versions(key)
-
-
-def get_project_issue_count(key: str) -> Any:
-    return _jira.get_project_issues_count(key)
+    Note on issue count: the library's `get_project_issues_count()` assumes the
+    old Cloud search response had a `total` field. Jira Cloud moved to
+    token-based paging and dropped `total`, so that method now KeyErrors. We use
+    `approximate_issue_count()` instead — it's the Cloud-native fast count
+    endpoint and returns an approximate integer.
+    """
+    return {
+        "project": _jira.project(key),
+        "components": _jira.get_project_components(key),
+        "versions": _jira.get_project_versions(key),
+        "issue_count": _jira.approximate_issue_count(f'project = "{key}"'),
+    }
 
 
 # ---------- users ----------
@@ -166,7 +159,10 @@ def search_users(query: str, start: int = 0, limit: int = 25) -> Any:
 
 
 def get_myself() -> Any:
-    return _jira.myself()
+    # The library's myself() hits /rest/api/2/myself without ?expand, so the
+    # response has groups.size / applicationRoles.size but empty items arrays.
+    # We hit the endpoint directly with expand to include group + role names.
+    return _jira.get("rest/api/2/myself?expand=groups,applicationRoles")
 
 
 # ---------- agile ----------
@@ -211,13 +207,50 @@ def get_sprint_issues(
 
 # ---------- metadata ----------
 
-def list_fields() -> Any:
-    return _jira.get_all_fields()
+def list_metadata() -> dict:
+    """One-shot: all fields (system + custom) + all statuses + all priorities.
+    Useful when the AI needs to resolve custom-field IDs, status names, or
+    priority names before building a JQL query.
 
+    Aggressive trim: each entry keeps only the keys the AI uses for JQL
+    construction. Self URLs, icon URLs, translated names, schema IDs, and
+    avatar URLs are dropped. Fields that Jira exposes on an issue but does
+    NOT expose to JQL (aggregate computed values like `aggregateprogress`,
+    sub-resources like `worklog` / `timetracking` / `thumbnail`, and fields
+    with no `clauseNames`) are dropped entirely — the AI can't filter on
+    them anyway, so listing them would just invite invalid JQL.
 
-def list_statuses() -> Any:
-    return _jira.get_all_statuses()
+    Raw payload is ~61 KB; this trimmed version is ~9 KB.
 
-
-def list_priorities() -> Any:
-    return _jira.get_all_priorities()
+    Edge case: for a handful of system fields the JQL clause name differs
+    from both `id` and `name` (fixVersion/affectedVersion/watchers/level/
+    remainingEstimate). We drop `clauseNames` here to save space, so the AI
+    falls back to the localized `name` (in quoted form) for those. Works in
+    practice, with rare misses on those ~7 fields.
+    """
+    fields = _jira.get_all_fields() or []
+    statuses = _jira.get_all_statuses() or []
+    priorities = _jira.get_all_priorities() or []
+    return {
+        "fields": [
+            {
+                "id": f.get("id"),
+                "name": f.get("name"),
+                "custom": f.get("custom", False),
+            }
+            for f in fields
+            if f.get("clauseNames")
+        ],
+        "statuses": [
+            {
+                "id": s.get("id"),
+                "name": s.get("name"),
+                "category": (s.get("statusCategory") or {}).get("name"),
+            }
+            for s in statuses
+        ],
+        "priorities": [
+            {"id": p.get("id"), "name": p.get("name")}
+            for p in priorities
+        ],
+    }
