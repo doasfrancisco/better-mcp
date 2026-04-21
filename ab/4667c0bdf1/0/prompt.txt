@@ -1,0 +1,17 @@
+can you create a simple test commit and push it?
+
+make it about @deploy_skills.py notice it works for windows but not for linux (maybe)
+
+how to make it work for bothh?
+
+---
+
+try to test it for @skills/git-push/ then
+
+---
+
+no iditio use @deploy_skills.py for @skills/git-push/
+
+---
+
+i don't see it installed in my skills though why?
