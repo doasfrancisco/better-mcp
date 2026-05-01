@@ -19,6 +19,8 @@
 | `express` | `expressjs/express` | repository |
 | `glpi` | `glpi-project/glpi` | repository |
 | `atlassian-python-api` (Jira/Confluence) | `atlassian-api/atlassian-python-api` | repository |
+| `entire-cli` | `entireio/cli` | repository |
+| `entire-skills` | `entireio/skills` | repository |
 
 ## Examples
 
