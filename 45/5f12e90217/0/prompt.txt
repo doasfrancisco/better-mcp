@@ -127,3 +127,11 @@ delete /claude-setup and /vendor-sklls-gap
 ---
 
 /git-push
+
+---
+
+git ignore and delete . just do this and push
+
+---
+
+just delete and push
