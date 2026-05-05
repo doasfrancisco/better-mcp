@@ -3,7 +3,7 @@
   "checkpoint_id": "baf51ecf9577",
   "strategy": "manual-commit",
   "branch": "master",
-  "checkpoints_count": 36,
+  "checkpoints_count": 37,
   "files_touched": [
     "mcps/obsidian/obsidian_client.py",
     "mcps/obsidian/pyproject.toml",
@@ -25,13 +25,19 @@
       "transcript": "/ba/f51ecf9577/1/full.jsonl",
       "content_hash": "/ba/f51ecf9577/1/content_hash.txt",
       "prompt": "/ba/f51ecf9577/1/prompt.txt"
+    },
+    {
+      "metadata": "/ba/f51ecf9577/2/metadata.json",
+      "transcript": "/ba/f51ecf9577/2/full.jsonl",
+      "content_hash": "/ba/f51ecf9577/2/content_hash.txt",
+      "prompt": "/ba/f51ecf9577/2/prompt.txt"
     }
   ],
   "token_usage": {
-    "input_tokens": 355,
-    "cache_creation_tokens": 635019,
-    "cache_read_tokens": 13574362,
-    "output_tokens": 176405,
-    "api_call_count": 153
+    "input_tokens": 540,
+    "cache_creation_tokens": 938360,
+    "cache_read_tokens": 23094350,
+    "output_tokens": 266695,
+    "api_call_count": 229
   }
 }
