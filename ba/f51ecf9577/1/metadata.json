@@ -1,0 +1,94 @@
+{
+  "cli_version": "0.5.6",
+  "checkpoint_id": "baf51ecf9577",
+  "session_id": "436e12d5-1684-49d0-b329-a05bf0caff54",
+  "strategy": "manual-commit",
+  "created_at": "2026-05-05T00:47:04.8831334Z",
+  "branch": "master",
+  "checkpoints_count": 6,
+  "files_touched": [
+    "nia.md",
+    "skills/sources/SKILL.md"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-opus-4-7[1m]",
+  "turn_id": "98263e63e800",
+  "token_usage": {
+    "input_tokens": 46,
+    "cache_creation_tokens": 75695,
+    "cache_read_tokens": 755223,
+    "output_tokens": 9629,
+    "api_call_count": 17
+  },
+  "session_metrics": {
+    "turn_count": 6
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-05-05T00:47:04.8642737Z",
+    "agent_lines": 0,
+    "agent_removed": 0,
+    "human_added": 154,
+    "human_modified": 98,
+    "human_removed": 0,
+    "total_committed": 164,
+    "total_lines_changed": 253,
+    "agent_percentage": 0,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 2058,
+      "user_lines_removed": 46,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        "mcps/obsidian/extract_book.py": 194,
+        "mcps/obsidian/ingest_pdf.py": 64,
+        "mcps/obsidian/pyproject.toml": 11,
+        "mcps/obsidian/setup_layout.py": 121,
+        "mcps/obsidian/test_obsidian.py": 132,
+        "mcps/obsidian/uv.lock": 1489,
+        "nia.md": 47
+      },
+      "user_removed_per_file": {
+        "nia.md": 46
+      }
+    },
+    {
+      "checkpoint_number": 2,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 2058,
+      "agent_lines_removed": 46
+    },
+    {
+      "checkpoint_number": 3,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 2058,
+      "agent_lines_removed": 46
+    },
+    {
+      "checkpoint_number": 4,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 2058,
+      "agent_lines_removed": 46
+    },
+    {
+      "checkpoint_number": 5,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 2063,
+      "agent_lines_removed": 46
+    },
+    {
+      "checkpoint_number": 6,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 2068,
+      "agent_lines_removed": 46
+    }
+  ]
+}
