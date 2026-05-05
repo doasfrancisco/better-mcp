@@ -161,7 +161,7 @@ name = "my-mcp-server"
 version = "1.0.0"
 requires-python = ">=3.11"
 dependencies = [
-    "fastmcp==3.0.2",
+    "fastmcp==3.1.1",
     "python-dotenv>=1.0",
     "my-api-library>=1.0",
 ]

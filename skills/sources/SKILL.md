@@ -95,6 +95,11 @@ Use this **exact template** at the project root. Replace only the `<project-name
 
 ## Rules
 
+- **Pick the command that matches the question shape, not just `search query`:**
+  - `search query` → conceptual/semantic ("how does X work", "what's the pattern for Y")
+  - `grep` → known literal (model ID, symbol, error string, config key)
+  - `tree` → discovering structure ("what's in this repo/docs site")
+  - `read` → you already know the file path
 - **Never pipe `nia` output through `head -N` or `tail -N`.** The output can be 2000+ lines. You MUST read ALL of it. If the output is split across chunks, read every chunk before proceeding. Missing a single source leads to wrong follow-up searches and wasted user time.
 - **If the source is a package/library, always ask how to install it** (pip name, Python/Node version, any extras). E.g. `"how do I install X - pip name, python version, async extras?"`
 
