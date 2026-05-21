@@ -1,4 +1,4 @@
-"""Deploy skills from skills/ to Claude and Droid personal skill folders."""
+"""Deploy skills from skills/ to Claude, Droid, and the shared agents skill folder."""
 
 import argparse
 import os
@@ -10,6 +10,7 @@ SKILLS_SRC = Path(__file__).parent / "skills"
 DESTINATIONS = {
     "claude": Path.home() / ".claude" / "skills",
     "droid": Path.home() / ".factory" / "skills",
+    "shared": Path.home() / ".agents" / "skills",
 }
 
 def _supports_color():
@@ -104,8 +105,8 @@ def diff_skill(name: str):
 
 def remove_skills(names: list[str]):
     # IMPORTANT: Callers should still make sure the user actually wanted this
-    # before running `--remove`, because it deletes the named skills from both
-    # ~/.claude/skills and ~/.factory/skills in one shot with no extra prompt.
+    # before running `--remove`, because it deletes the named skills from all
+    # configured destinations in one shot with no extra prompt.
 
     for name in names:
         found = False
@@ -116,16 +117,16 @@ def remove_skills(names: list[str]):
                 shutil.rmtree(dst)
                 print(f"{GREEN}Removed '{name}' from {dst} [{label}]{RESET}")
         if not found:
-            print(f"{YELLOW}'{name}' is not installed in Claude or Droid{RESET}")
+            print(f"{YELLOW}'{name}' is not installed in any configured destination{RESET}")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Deploy skills to Claude and Droid personal skill folders.")
+    parser = argparse.ArgumentParser(description="Deploy skills to Claude, Droid, and the shared agents skill folder.")
     parser.add_argument("--add", nargs="+", metavar="SKILL", help="Deploy one or more skills")
     parser.add_argument("--all", action="store_true", help="Deploy all skills")
     parser.add_argument("--diff", metavar="SKILL", help="Show what would change without deploying")
     parser.add_argument("--list", action="store_true", help="List available skills")
-    parser.add_argument("--remove", nargs="+", metavar="SKILL", help="Remove one or more installed skills from both Claude and Droid")
+    parser.add_argument("--remove", nargs="+", metavar="SKILL", help="Remove one or more installed skills from all configured destinations")
     args = parser.parse_args()
 
     if args.list or (not args.add and not args.all and not args.diff and not args.remove):
