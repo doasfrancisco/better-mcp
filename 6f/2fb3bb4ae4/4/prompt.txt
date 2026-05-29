@@ -1,0 +1,61 @@
+[Image #1] i have to stop the vnc system and close up my vps on azure how to do this quick? do this by logging into ssh signal
+
+---
+
+[Image #2]
+
+i'm stopping that should do the trick right?
+
+---
+
+can you check again if you can connect to it?
+
+---
+
+how was it possible to get hacked? i thought the vnc wasn't problematic?
+
+also does that mean people had acces to my vps?
+
+---
+
+and does vnc allow for programmatically make queries? like downloading stuff like my chats
+
+---
+
+now i want to update @mcps/whatsapp\ so it's the whatsapp with mcp that brings my chats from the whatsapp clone on my desktop. can you find it?
+
+---
+
+it's at @mcps\
+
+---
+
+ok so i want to activate it. i don't think i need to change the name. i'm guessing all i need is to build the electron app and start the mcp right?
+
+---
+
+i'd rather build the app and then start it. so build it and then open it
+
+---
+
+i just closed it. reopen it again
+
+---
+
+rebuild it please
+
+---
+
+ok then you add it.
+
+---
+
+can you open the build again?
+
+---
+
+can you now read my chats?
+
+---
+
+what does Julissa Riveros say today?

@@ -3,7 +3,7 @@
   "checkpoint_id": "6f2fb3bb4ae4",
   "strategy": "manual-commit",
   "branch": "master",
-  "checkpoints_count": 33,
+  "checkpoints_count": 41,
   "files_touched": [
     "clis/new_setup/README.md",
     "clis/new_setup/new_setup/__init__.py",
@@ -43,13 +43,19 @@
       "transcript": "/6f/2fb3bb4ae4/3/full.jsonl",
       "content_hash": "/6f/2fb3bb4ae4/3/content_hash.txt",
       "prompt": "/6f/2fb3bb4ae4/3/prompt.txt"
+    },
+    {
+      "metadata": "/6f/2fb3bb4ae4/4/metadata.json",
+      "transcript": "/6f/2fb3bb4ae4/4/full.jsonl",
+      "content_hash": "/6f/2fb3bb4ae4/4/content_hash.txt",
+      "prompt": "/6f/2fb3bb4ae4/4/prompt.txt"
     }
   ],
   "token_usage": {
-    "input_tokens": 32571,
-    "cache_creation_tokens": 794818,
-    "cache_read_tokens": 17488409,
-    "output_tokens": 225958,
-    "api_call_count": 194
+    "input_tokens": 54289,
+    "cache_creation_tokens": 1126213,
+    "cache_read_tokens": 20235414,
+    "output_tokens": 274992,
+    "api_call_count": 231
   }
 }
