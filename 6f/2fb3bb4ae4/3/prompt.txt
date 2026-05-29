@@ -1,0 +1,135 @@
+i'd like to add this on my obsidian. but i think right now it only allows mathematical things right?
+
+"i don't think learning by memorizing helps much.
+
+i couldn't remember the questions themselves on each anki bin.
+but i did remember the answers once i saw the question.
+but what is important is to pattern match the questions to real world issues so i can guide my actions through the answers.
+
+
+i think what's best is to practice a specific skill that's generalizable everyday. something that helps with the fundamentals.
+
+remembering isn't enough. it's remembering the fundamentals what makes me move faster i think.
+
+
+also i think maybe deleting cards make me focus on what matters. forcing me to stay on the core of what i should know instead."
+
+1. confirm if my obsidian only allows adding mathematical things.
+
+---
+
+yeah it looks good add them please. 
+
+"i don't think learning by memorizing helps much.
+
+i couldn't remember the questions themselves on each anki bin.
+but i did remember the answers once i saw the question.
+but what is important is to pattern match the questions to real world issues so i can guide my actions through the answers.
+
+
+i think what's best is to practice a specific skill that's generalizable everyday. something that helps with the fundamentals.
+
+remembering isn't enough. it's remembering the fundamentals what makes me move faster i think.
+
+
+also i think maybe deleting cards make me focus on what matters. forcing me to stay on the core of what i should know instead." 
+
+don't change my words please
+
+---
+
+add a readme on @mcps/obsidian\ i'm trying to build this:
+
+"LLM Knowledge Bases
+
+Something I'm finding very useful recently: using LLMs to build personal knowledge bases for various topics of research interest. In this way, a large fraction of my recent token throughput is going less into manipulating code, and more into manipulating knowledge (stored as markdown and images). The latest LLMs are quite good at it. So:
+
+Data ingest:
+I index source documents (articles, papers, repos, datasets, images, etc.) into a raw/ directory, then I use an LLM to incrementally "compile" a wiki, which is just a collection of .md files in a directory structure. The wiki includes summaries of all the data in raw/, backlinks, and then it categorizes data into concepts, writes articles for them, and links them all. To convert web articles into .md files I like to use the Obsidian Web Clipper extension, and then I also use a hotkey to download all the related images to local so that my LLM can easily reference them.
+
+IDE:
+I use Obsidian as the IDE "frontend" where I can view the raw data, the the compiled wiki, and the derived visualizations. Important to note that the LLM writes and maintains all of the data of the wiki, I rarely touch it directly. I've played with a few Obsidian plugins to render and view data in other ways (e.g. Marp for slides).
+
+Q&A:
+Where things get interesting is that once your wiki is big enough (e.g. mine on some recent research is ~100 articles and ~400K words), you can ask your LLM agent all kinds of complex questions against the wiki, and it will go off, research the answers, etc. I thought I had to reach for fancy RAG, but the LLM has been pretty good about auto-maintaining index files and brief summaries of all the documents and it reads all the important related data fairly easily at this ~small scale.
+
+Output:
+Instead of getting answers in text/terminal, I like to have it render markdown files for me, or slide shows (Marp format), or matplotlib images, all of which I then view again in Obsidian. You can imagine many other visual output formats depending on the query. Often, I end up "filing" the outputs back into the wiki to enhance it for further queries. So my own explorations and queries always "add up" in the knowledge base.
+
+Linting:
+I've run some LLM "health checks" over the wiki to e.g. find inconsistent data, impute missing data (with web searchers), find interesting connections for new article candidates, etc., to incrementally clean up the wiki and enhance its overall data integrity. The LLMs are quite good at suggesting further questions to ask and look into.
+
+Extra tools:
+I find myself developing additional tools to process the data, e.g. I vibe coded a small and naive search engine over the wiki, which I both use directly (in a web ui), but more often I want to hand it off to an LLM via CLI as a tool for larger queries. 
+
+Further explorations:
+As the repo grows, the natural desire is to also think about synthetic data generation + finetuning to have your LLM "know" the data in its weights instead of just context windows.
+
+TLDR: raw data from a given number of sources is collected, then compiled by an LLM into a .md wiki, then operated on by various CLIs by the LLM to do Q&A and to incrementally enhance the wiki, and all of it viewable in Obsidian. You rarely ever write or edit the wiki manually, it's the domain of the LLM. I think there is room here for an incredible new product instead of a hacky collection of scripts."
+
+i think i have the raw part but i'm missing the wiki. how should i build this?
+
+---
+
+ok do 1 and 2 and how would the compile step be? explain first
+
+---
+
+ok continue
+
+---
+
+it's reconnected so try to compile
+
+---
+
+so how does the compile algo works when i want the wiki?
+
+---
+
+ok. put this algo in @skills\ in a new folder. follow @new_skill_guidelines.md 
+
+call it compile-wiki
+
+---
+
+add it yourself
+
+---
+
+i've been thinkgin about this, help me think this through:
+
+"I use anki
+
+And I thought maybe memorizing word definitions would help me understand more complex concepts better 
+
+And I think I’m right
+
+Remembering definitions is like understanding axioms 
+
+But axioms must be powerful else there isn’t much need of them which is why it’s important to keep them a few of them 
+
+So what definitions should I remember if I’m learning database design
+
+Because for example I have a card that’s about relationships 
+
+
+Like what type of symbols mean
+
+A professor works in one university 
+A professor works in one or zero universities 
+
+A professor works in one or many universities 
+A professor works in zero or many universities "
+
+---
+
+so what note should be added to my obsdiian?
+
+---
+
+i meant to say. what info should be added?
+
+---
+
+what is acid?
