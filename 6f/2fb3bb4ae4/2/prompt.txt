@@ -1,0 +1,183 @@
+i want to create clis similar to this: "C:\Francisco\github-repositories\supa\supaflow\cli" analyze how it works. and create a simple one in @clis\ called new_project/
+
+which simply creates an empty CLAUDE.md.
+
+but show me what you will do because. i think it needs to use uv. and also maek sure the cli is installed in ~ so i don't get path errors if i install it and change paths. and also how would updating it work? if i update here how to update globally (installed?
+
+---
+
+is this the best structure? isnt' there something simpler? "  clis/new_project/
+  ├── pyproject.toml          # name=new-project, script: new-project = "new_project.cli:main"
+  ├── README.md               # install + update instructions
+  └── src/new_project/
+      ├── __init__.py
+      ├── __main__.py
+      └── cli.py              # creates an empty CLAUDE.md in cwd
+"
+
+---
+
+change the name to setup instead of new_projectd
+
+---
+
+setup.py then call it setup_cli.py
+
+---
+
+setup.py then call it new_setup.py
+
+---
+
+call the folder new_setup as well and the clid should newsetup
+
+---
+
+now i want yout to help me do this.
+
+newsetup is meant to:
+
+createa git repo.
+add a frontend/ and backend/ folders.
+
+for frontend npx create-next-app@latest frontend --yes
+and for backend django-admin startproject config . 
+
+and a .gitignore on backend/ with this: C:\Francisco\github-repositories\anna\ana\db\.gitignore
+
+and a CLAUDE.md file on root with this: 
+
+"# Project rules
+
+1. Never run `python manage.py makemigrations` yourself — I run it manually. Never hand-edit or hand-write migration files either.
+
+2. Never add comments or docstrings to code unless I explicitly tell you to. This includes module docstrings, class docstrings, function/method docstrings, inline `#` comments, field-level comments, and section-divider comments. Write code with no commentary by default.
+
+3. Never change model attributes, add new relations (ForeignKey/OneToOne/ManyToMany), or create new models unless I explicitly tell you to. This includes renaming fields, changing field types/options, adding/removing fields on existing models, adding/removing relations, and introducing new Django model classes. If a task seems to require any of these, stop and ask first."
+
+and i'm guessing the output of each command should show somehow.
+
+do you understand? confirm if you do
+
+---
+
+"  - The .gitignore content gets embedded into the tool, not read from C:\...\anna\ana\db\.gitignore at runtime. That path is machine-specific and the tool
+  is snapshot-installed, so reading it live would break the moment that file moves. I'll bake the 67 lines in as a constant. (Trade-off: if you change
+  anna's .gitignore, newsetup won't pick it up unless I re-sync — acceptable for a scaffolder.)" 
+
+bro you create your own .gitignore template here to pick up? so installing it also moves to the global and no path issues are tehre? what are you doing?
+
+---
+
+"  - The .gitignore content gets embedded into the tool, not read from C:\...\anna\ana\db\.gitignore at runtime. That path is machine-specific and the tool
+  is snapshot-installed, so reading it live would break the moment that file moves. I'll bake the 67 lines in as a constant. (Trade-off: if you change
+  anna's .gitignore, newsetup won't pick it up unless I re-sync — acceptable for a scaffolder.)" 
+
+bro you create your own .gitignore template here to pick up? so installing it also moves to the global and no path issues are tehre? what are you doing?
+
+don't make it a harcode string in the cli. make it a file here
+
+---
+
+1. i want you to remove newsetup so if it's in this folder i have to pass .
+2. then i want you to create a new command called list so i can see the templates i can choose from. what you just created is one template.
+3. the templates themselves are personalized i can do one but only the frontend part etc.
+
+so how should this be built?
+
+i'm thinking something like:
+
+
+newsetup --name test_project --template default --only frontend
+newsetup list
+
+what do you think?
+
+---
+
+newsetup --list
+
+---
+
+or maybe:
+
+newsetup new --name test_project --template default --only frontend
+newsetup list
+
+and then also --only can be the config file (CLAUDE.md) or the folders. 
+
+
+like  newsetup new --name test_project --template default --only config (this is the CLAUDE.md file or .gitignore, basically anything in root)
+
+but also --only can complete the thing. like --only frontend backend (if both let's call folders/modules, then also ofc the config) or maybe
+
+if --only frontend (then also include the .gitinore and cladue.md or anythin that was on root) but if i do newsetup new --name test --template default --bare it's only root.
+
+and then i think maybe --name should maybe be --path? so i can accept --path .
+
+help me think this trhough. be short
+
+---
+
+if i include any module "  3. Keep --only orthogonal — don't auto-drag config into frontend. Your "if frontend then also config" rule is surprising and hard to remember. Instead
+  make it explicit: --only frontend config. Then --bare is just sugar for --only config — so you don't need a separate --bare flag at all. One rule: --only
+  = exactly what you list." then it should include config (anyting in root). config shouldn't be an ption. that way --bare is the only thing that could get me the template bare.
+
+also:
+
+  new_setup/templates/<name>/
+    template.toml        # per-component shell commands + description
+    config/              # → copied to root  (CLAUDE.md, .gitignore)
+    backend/             # → copied into backend/  (.gitignore)
+    frontend/            # → overlay into frontend/ (usually empty; next makes it)" yes config is anything that should get added to root. but also. if i add any other folder besides backend/ or frontend/ liek maybe migrate/ or infra/ that name automatically becomes an option module and also should show in the list. do you understand? confirm
+
+---
+
+explain these again:
+"  The one open question is where each module's commands run — e.g. django-admin startproject config . must run inside ./backend/, while npx create-next-app
+  frontend runs at root. Two ways:
+
+  A. Convention: module backend → commands run in ./backend/, files copy into ./backend/. Simple 1:1. (Frontend is the odd one: create-next-app makes
+  ./frontend itself, so its command runs at root.)
+
+  B. Explicit cwd in toml: each module declares its working dir. More flexible, slightly more verbose."
+
+---
+
+then do b and everything else . ultrathink
+
+---
+
+wait about this:
+
+"       9 +newsetup list                                          # show templates + their modules
+      10 +newsetup new --path .          --template default      # scaffold all modules + config here
+      11 +newsetup new --path myapp      --only frontend         # one module (+ config) into ./myapp
+      12 +newsetup new --path myapp      --only frontend backend # several modules (+ config)
+      13 +newsetup new --path .          --bare                  # config root files only, no modules
+      14 +newsetup new --path . --bare --force                   # overwrite existing root files"
+
+i should alway pass a template else what is it suppsoed to install?
+
+---
+
+path should go first here: "       9 +newsetup list                                                    # show templates + their modules
+      10 +newsetup new --template default --path .                         # all modules + config here
+      11 +newsetup new --template default --path myapp --only frontend     # one module (+ config) into ./myapp
+      12 +newsetup new --template default --path myapp --only frontend backend
+      13 +newsetup new --template default --path . --bare                  # config root files only, no modules
+      14 +newsetup new --template default --path . --bare --force          # overwrite existing root files"
+
+---
+
+what claude.md am i adding? show it to me
+
+---
+
+ok i want to split this. 
+
+"# Project rules
+
+1. Never add comments or docstrings to code unless I explicitly tell you to. This includes module docstrings, class docstrings, function/method docstrings, inline `#` comments, field-level comments, and section-divider comments. Write code with no commentary by default." should be on config for defualt template.
+
+and the other two should be their CLAUDE.md inside backend/
