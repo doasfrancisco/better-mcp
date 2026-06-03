@@ -1,0 +1,86 @@
+{
+  "cli_version": "0.5.6",
+  "checkpoint_id": "8f31f164d889",
+  "session_id": "26061dac-4149-4dc4-96e8-d6173c3975e1",
+  "strategy": "manual-commit",
+  "created_at": "2026-06-03T21:49:46.452685Z",
+  "branch": "master",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "clis/new_setup/README.md",
+    "clis/new_setup/new_setup/cli.py",
+    "clis/new_setup/new_setup/templates/default/template.toml",
+    "clis/new_setup/pyproject.toml"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-opus-4-8",
+  "turn_id": "ba6b677db9a2",
+  "token_usage": {
+    "input_tokens": 22518,
+    "cache_creation_tokens": 94929,
+    "cache_read_tokens": 332437,
+    "output_tokens": 19954,
+    "api_call_count": 8
+  },
+  "session_metrics": {
+    "turn_count": 1
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-06-03T21:49:46.4360541Z",
+    "agent_lines": 0,
+    "agent_removed": 0,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 668,
+    "total_committed": 87,
+    "total_lines_changed": 743,
+    "agent_percentage": 0,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 665,
+      "user_lines_removed": 19,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0,
+      "user_added_per_file": {
+        "clis/new_setup/README.md": 134,
+        "clis/new_setup/new_setup/cli.py": 89,
+        "clis/new_setup/new_setup/templates/default/backend/Dockerfile": 15,
+        "clis/new_setup/new_setup/templates/default/backend/entrypoint.sh": 13,
+        "clis/new_setup/new_setup/templates/default/infra/_core/.gitignore": 8,
+        "clis/new_setup/new_setup/templates/default/infra/_core/core.tfvars.fragment": 5,
+        "clis/new_setup/new_setup/templates/default/infra/_core/main.tf": 27,
+        "clis/new_setup/new_setup/templates/default/infra/_core/variables.tf": 28,
+        "clis/new_setup/new_setup/templates/default/infra/ecr/deploy_policy.tf": 33,
+        "clis/new_setup/new_setup/templates/default/infra/ecr/ecr.tf": 9,
+        "clis/new_setup/new_setup/templates/default/infra/ecr/outputs_ecr.tf": 4,
+        "clis/new_setup/new_setup/templates/default/infra/ecs/deploy_policy.tf": 22,
+        "clis/new_setup/new_setup/templates/default/infra/ecs/ecs.tf": 36,
+        "clis/new_setup/new_setup/templates/default/infra/ecs/ecs.tfvars.fragment": 2,
+        "clis/new_setup/new_setup/templates/default/infra/ecs/iam.tf": 45,
+        "clis/new_setup/new_setup/templates/default/infra/ecs/outputs_ecs.tf": 19,
+        "clis/new_setup/new_setup/templates/default/infra/ecs/variables_ecs.tf": 11,
+        "clis/new_setup/new_setup/templates/default/infra/iam/iam.tf": 46,
+        "clis/new_setup/new_setup/templates/default/infra/iam/iam.tfvars.fragment": 1,
+        "clis/new_setup/new_setup/templates/default/infra/iam/outputs_iam.tf": 4,
+        "clis/new_setup/new_setup/templates/default/infra/iam/variables_iam.tf": 5,
+        "clis/new_setup/new_setup/templates/default/infra/rds/database.tf": 58,
+        "clis/new_setup/new_setup/templates/default/infra/rds/outputs_rds.tf": 4,
+        "clis/new_setup/new_setup/templates/default/infra/rds/rds.tfvars.fragment": 2,
+        "clis/new_setup/new_setup/templates/default/infra/rds/variables_rds.tf": 11,
+        "clis/new_setup/new_setup/templates/default/infra/s3/outputs_s3.tf": 4,
+        "clis/new_setup/new_setup/templates/default/infra/s3/storage.tf": 21,
+        "clis/new_setup/new_setup/templates/default/template.toml": 8,
+        "clis/new_setup/pyproject.toml": 1
+      },
+      "user_removed_per_file": {
+        "clis/new_setup/README.md": 11,
+        "clis/new_setup/new_setup/cli.py": 6,
+        "clis/new_setup/new_setup/templates/default/template.toml": 1,
+        "clis/new_setup/pyproject.toml": 1
+      }
+    }
+  ]
+}
